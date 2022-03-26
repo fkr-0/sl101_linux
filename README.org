@@ -24,6 +24,6 @@ The kernel can power a rootbinded OS. Further details [[https://sourceforge.net/
 
 
 ** Links
-https://github.com/grate-driver/
-https://github.com/timduru/tf101-katkernel/
-https://forum.xda-developers.com/t/guide-dual-boot-theeasyway-how-to-setup-linux-rootbind-method-updated-may-16th.2684854/
+- https://github.com/grate-driver/
+- https://github.com/timduru/tf101-katkernel/
+- https://forum.xda-developers.com/t/guide-dual-boot-theeasyway-how-to-setup-linux-rootbind-method-updated-may-16th.2684854/
