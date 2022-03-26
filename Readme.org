@@ -1,0 +1,85 @@
+#+TITLE: SL101 aka EP102 aka EEPadSlider
+
+https://github.com/mozggg/TF101-GNU-kernel/blob/TF101_mozggg/drivers/input/asusec/asusec.c
+https://github.com/novaspirit/tf101-linux-2.6.36/blob/master/drivers/input/asusec/asusec.c
+https://github.com/grate-driver/linux/blob/master/drivers/input/serio/asus-ec-kbc.c
+https://github.com/timduru/tf101-katkernel/blob/dev/drivers/input/asusec/asusec.c
+https://github.com/grate-driver/linux/blob/master/drivers/mfd/asus-ec.c
+
+https://discord.com/channels/923657619787350028/923657620382945375
+
+** docker
+https://github.com/grate-driver/linux/pull/23
+
+#+begin_src shell
+export CROSS_COMPILE="arm-none-eabi-" ARCH="arm" && make tegra_defconfig && make && make INSTALL_MOD_PATH=<path> modules_install
+#+end_src
+on docker file below
+#+begin_src shell
+FROM ubuntu:xenial-20200212
+
+# Refresh local packages cache.
+RUN apt-get update
+
+# Install packages.
+RUN apt-get install --no-install-recommends -y \
+# Install some useful system packages.
+    sudo \
+# Install build tools.
+    make gcc-arm-none-eabi gcc g++ libc6-dev device-tree-compiler bison flex python3 python3-dev swig cpio lzma bc kmod libgmp-dev \
+# Install temporary packages for debugging.
+    vim git gdb-arm-none-eabi \
+# Install qemu dependencies.
+    libglib2.0-dev libpixman-1-dev
+
+# From now on we will work as regular user. First add user.
+RUN useradd -m -d /home/user -s /bin/bash -G sudo user
+RUN echo user:pass | chpasswd
+
+# Make new user active.
+USER user
+WORKDIR /home/user
+#+end_src
+
+https://forum.xda-developers.com/t/reference-how-to-compile-an-android-kernel.3627297/
+** other build instructions -> discord
+
+* linux-firmware
+https://github.com/clamor-s/linux-firmware
+
+* INSTALL THIS!
+https://github.com/grate-driver/libvdpau-tegra
+
+* Build on transformer:
+-> use buildscript
+-> /make zImage/ after
+-> /blobunpack/ old extracted oldkernel.zip
+-> /unpack_bootimg/ LNX file of old blob
+    -> or abootimg -x to get the files for below
+-> replace /kernel/ with new zImage
+-> /mkbootimg/ to make new file
+
+mkbootimg --kernel ../build_kernel/5.17.0-rc7-next-20220310-g13a1a1da3216/zImage \
+          --ramdisk ./UNP/ramdisk \
+          --dtb ../build_kernel/5.17.0-rc7-next-20220310-g13a1a1da3216/dts/tegra20-asus-tf101.dtb \
+          --cmdline "nvmem=128M@384M mem=1024M@0M vmalloc=256M root=/dev/mmcblk1 rw video=tegrafb console=tty0 usbcore.old_scheme_first=1 tegraboot=sdmmc" \
+          --pagesize 2048 \
+          -o newbootimg
+          abootimg
+  abootimg  --create newBlob.LNX \
+            -f bootimg.cfg \
+            -r initrd.img \
+            -k ../../build_kernel/5.17.0-rc7-next-20220310-g13a1a1da3216/zImage
+-> /blobpack/:
+    #+begin_src shell
+blobpack -s NEWFILENAME LNX OLDFILENAME
+    #+end_src
+    zip -r9 kernel.zip * -x README.md kernel.zip
+
+https://forum.xda-developers.com/t/dev-how-to-un-re-pack-a-boot-blob-and-unyaff-a-boot-img.1890912/
+https://forum.xda-developers.com/t/reference-how-to-compile-an-android-kernel.3627297/
+
+
+-> a) make dev/p4 backup to compare sizes to check if dd would be ok
+-> b) dd from twrp
+-> c) compare 5.12 and 5.16 zip contents

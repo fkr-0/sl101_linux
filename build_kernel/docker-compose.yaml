@@ -1,0 +1,17 @@
+version: "3.1"
+services:
+  sl101-kernel-builder:
+    # entrypoint: /home/user/make_tegra.sh
+    entrypoint: /bin/bash
+    # networks:
+    #   - host
+
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    # command: /home/user/make_tegra.sh
+    volumes:
+      - ./data:/data
+
+    stdin_open: true # docker run -i
+    tty: true # docker run -t
