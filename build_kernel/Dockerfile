@@ -9,11 +9,12 @@ RUN apt-get install --no-install-recommends -y \
     device-tree-compiler bison flex python3 python3-dev \
     swig cpio lzma bc kmod libgmp-dev libssl-dev \
     ca-certificates vim git gdb-arm-none-eabi \
-    libglib2.0-dev libpixman-1-dev libmpc-dev abootimg
+    libglib2.0-dev libpixman-1-dev libmpc-dev abootimg wget
 
 # From now on we will work as regular user. First add user.
 RUN useradd -m -d /home/user -s /bin/bash -G sudo user
 RUN echo user:pass | chpasswd
+RUN sudo echo "user ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers
 
 # Make new user active.
 USER user

@@ -1,0 +1,17 @@
+#+TITLE: Linux on ASUS SL101/EP102/EEE Pad Slider
+
+-> grate kernel, currently [[https://github.com/clamor-s/linux/tree/sl101][there]].
+
+Build current commit on ~sl101~ branch using docker:
+#+begin_src shell
+make build
+make kernel
+make enter # entering docker container
+./make_tegra.sh
+#+end_src
+after compilation kernel as zImage with appended dtb resides in ~/data~ which is mounted in the host os.
+
+
+** Links
+https://github.com/grate-driver/
+https://github.com/timduru/tf101-katkernel/

@@ -27,7 +27,7 @@ set_up_apt() {
     device-tree-compiler bison flex python3 python3-dev \
     swig cpio lzma bc kmod libgmp-dev libssl-dev \
     ca-certificates vim git gdb-arm-none-eabi \
-    libglib2.0-dev libpixman-1-dev libmpc-dev abootimg
+    libglib2.0-dev libpixman-1-dev libmpc-dev abootimg wget
 }
 
 
@@ -41,7 +41,7 @@ set_up() {
         { [ -d "gcc-arm-none-eabi-10.3-2021.10" ] && export PATH="/home/user/gcc-arm-none-eabi-10.3-2021.10/bin:$PATH"; } || \
             { wget "https://developer.arm.com/-/media/Files/downloads/gnu-rm/10.3-2021.10/gcc-arm-none-eabi-10.3-2021.10-x86_64-linux.tar.bz2" && tar -xvf gcc-arm-none-eabi-10.3-2021.10-x86_64-linux.tar.bz2; }
         { [ -d "gcc-arm-none-eabi-10.3-2021.10" ] && export PATH="/home/user/gcc-arm-none-eabi-10.3-2021.10/bin:$PATH"; } || \
-            echo GCC not found. Exit. && exit 1;
+            { echo GCC not found. Exit. && exit 1; }
     fi
 }
 
@@ -108,8 +108,7 @@ ramdiskaddr = 0x11000000
 secondaddr = 0x10f00000
 tagsaddr = 0x10000100
 name =
-cmdline = nvmem=128M@384M mem=1024M@0M vmalloc=256M root=/dev/mmcblk1 rw video=tegrafb console=tty0 usbcore.old_scheme_first=1 tegraboot=sdmmc
-"
+cmdline = nvmem=128M@384M mem=1024M@0M vmalloc=256M root=/dev/mmcblk1 rw video=tegrafb console=tty0 usbcore.old_scheme_first=1 tegraboot=sdmmc"
 }
 
 
