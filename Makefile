@@ -22,3 +22,10 @@ kernel: ## build kernel in docker container
 
 stop: ## stop kernel container
 	@docker-compose -f build_kernel/docker-compose.yaml down
+
+.PHONY: test check
+test: ## run SL101 tooling unit tests without contacting hardware
+	PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_sl101*.py'
+
+check: ## check SL101 Python syntax
+	python3 -m compileall -q scripts tests src

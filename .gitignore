@@ -1,0 +1,10 @@
+tmp/
+work/
+state/
+__pycache__/
+*.py[cod]
+.venv/
+.wsbridge/
+.ws-bridge/
+build_kernel/data/
+sl101/
