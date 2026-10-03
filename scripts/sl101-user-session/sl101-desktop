@@ -3,8 +3,12 @@ set -eu
 
 : "${XDG_RUNTIME_DIR:=/run/sl101-desktop-user}"
 : "${LIBSEAT_BACKEND:=seatd}"
-: "${SL101_DESKTOP_RENDERER:=grate}"
+: "${SL101_DESKTOP_RENDERER:=pixman}"
 [ ! -r /etc/sl101-desktop-renderer.conf ] || . /etc/sl101-desktop-renderer.conf
+[ ! -r /run/sl101-desktop-renderer.conf ] || . /run/sl101-desktop-renderer.conf
+# Service starts and SSH-driven restarts must not inherit an English keymap.
+export XKB_DEFAULT_LAYOUT=de
+export XKB_DEFAULT_OPTIONS=
 : "${SL101_DBUS_PIDFILE:=/run/sl101-session/dbus.pid}"
 : "${SL101_DBUS_SOCKET:=$XDG_RUNTIME_DIR/sl101-desktop-bus}"
 
@@ -14,12 +18,13 @@ chmod 700 "$XDG_RUNTIME_DIR"
 
 unset LD_LIBRARY_PATH GBM_BACKENDS_PATH LIBGL_DRIVERS_PATH MESA_LOADER_DRIVER_OVERRIDE
 WLR_RENDERER=pixman
-GRATE_PREFIX=/opt/grate-mesa25-qualified-541e60b7ef948852be32f9d75c22f5f8aaa8e2e6e3548298aae2f4d0fc2c7815
+GRATE_PREFIX=/usr/local/lib/sl101-grate-68a78e18af642275d3fec6fc93a4f20cd618d9f951981c7e240d5731e7f29ade
 case "$SL101_DESKTOP_RENDERER" in
   grate)
     if [ "$(uname -r)" = 7.0.1-postmarketos-grate ] &&
-       (cd "$GRATE_PREFIX" && sha256sum -c runtime.sha256 >/dev/null 2>&1); then
+       /usr/local/sbin/sl101-renderer-verify >/dev/null 2>&1; then
       WLR_RENDERER=gles2
+      export WLR_RENDERER_ALLOW_SOFTWARE=0
       LD_LIBRARY_PATH="$GRATE_PREFIX/lib"
       GBM_BACKENDS_PATH="$GRATE_PREFIX/lib/gbm"
       LIBGL_DRIVERS_PATH="$GRATE_PREFIX/lib"

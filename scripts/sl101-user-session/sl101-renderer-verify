@@ -1,0 +1,4 @@
+#!/usr/sbin/python3
+# Read-only verification is also available to the unprivileged session launcher.
+import runpy
+runpy.run_path('/usr/local/sbin/sl101-renderer-switch')['validate_grate']()

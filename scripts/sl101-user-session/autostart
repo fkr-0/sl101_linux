@@ -1,2 +1,2 @@
 #!/bin/sh
-/opt/nuraloumi/current/nuraloumi-panel --live >>"$HOME/.local/state/nuraloumi-panel.log" 2>&1 &
+/opt/nuraloumi/current/nuraloumi-panel --live --enable-renderer-switch >>"$HOME/.local/state/nuraloumi-panel.log" 2>&1 &
