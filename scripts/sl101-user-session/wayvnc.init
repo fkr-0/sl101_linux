@@ -1,0 +1,19 @@
+#!/sbin/openrc-run
+name="SL101 remote desktop"
+description="Share the labwc display through localhost VNC"
+supervisor="supervise-daemon"
+command="/usr/bin/wayvnc"
+command_user="user:user"
+export HOME=/home/user
+command_args="-C /etc/wayvnc/sl101.conf -R -f 10 -n SL101-Nura"
+respawn_delay=10
+respawn_max=0
+output_log="/var/log/sl101-wayvnc.log"
+error_log="/var/log/sl101-wayvnc.log"
+export XDG_RUNTIME_DIR=/run/sl101-desktop-user
+export WAYLAND_DISPLAY=wayland-0
+
+depend() {
+    need localmount sl101-desktop
+    after local
+}

@@ -1,0 +1,57 @@
+#!/sbin/openrc-run
+description="SL101 ad hoc pixman desktop"
+
+command="/usr/local/bin/sl101-desktop"
+command_background=yes
+command_user="user:user"
+export HOME=/home/user
+export XDG_RUNTIME_DIR=/run/sl101-desktop-user
+pidfile="/run/sl101-desktop.pid"
+output_log="/var/log/sl101-desktop.log"
+error_log="/var/log/sl101-desktop.log"
+
+dbus_pidfile="/run/sl101-session/dbus.pid"
+dbus_socket="/run/sl101-desktop-user/sl101-desktop-bus"
+
+depend() {
+	need seatd dbus
+	after local
+}
+
+cleanup_session_bus() {
+	local buspid
+
+	/usr/local/bin/sl101-audio-session stop >/dev/null 2>&1 || true
+
+	if [ -r "$dbus_pidfile" ]; then
+		buspid=$(cat "$dbus_pidfile" 2>/dev/null || true)
+		if [ -n "$buspid" ] && kill -0 "$buspid" 2>/dev/null; then
+			kill "$buspid" 2>/dev/null || true
+		fi
+	fi
+
+	rm -f "$dbus_pidfile" "$dbus_socket"
+}
+
+start_pre() {
+	mkdir -p /run/sl101-desktop-user /run/sl101-session /run/sl101-audio /var/log/sl101-audio
+	chown -R user:user /run/sl101-desktop-user /run/sl101-session /run/sl101-audio /var/log/sl101-audio
+	chmod 700 /run/sl101-desktop-user
+	mkdir -p /run/user/1000
+	chown 1000:1000 /run/user/1000
+	chmod 700 /run/user/1000
+	touch /var/log/sl101-desktop.log /var/log/sl101-wayvnc.log
+	chown user:user /var/log/sl101-desktop.log /var/log/sl101-wayvnc.log
+	# A live compositor not owned by this pidfile is exactly the stale-wrapper
+	# failure mode being guarded against. Never start a second DRM compositor.
+	if pidof labwc >/dev/null 2>&1; then
+		eerror "labwc is already running; refusing duplicate desktop start"
+		return 1
+	fi
+
+	cleanup_session_bus
+}
+
+stop_post() {
+	cleanup_session_bus
+}

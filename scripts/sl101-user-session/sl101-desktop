@@ -1,0 +1,55 @@
+#!/bin/sh
+set -eu
+
+: "${XDG_RUNTIME_DIR:=/run/sl101-desktop-user}"
+: "${LIBSEAT_BACKEND:=seatd}"
+: "${SL101_DESKTOP_RENDERER:=grate}"
+[ ! -r /etc/sl101-desktop-renderer.conf ] || . /etc/sl101-desktop-renderer.conf
+: "${SL101_DBUS_PIDFILE:=/run/sl101-session/dbus.pid}"
+: "${SL101_DBUS_SOCKET:=$XDG_RUNTIME_DIR/sl101-desktop-bus}"
+
+export XDG_RUNTIME_DIR LIBSEAT_BACKEND WLR_RENDERER
+mkdir -p "$XDG_RUNTIME_DIR"
+chmod 700 "$XDG_RUNTIME_DIR"
+
+unset LD_LIBRARY_PATH GBM_BACKENDS_PATH LIBGL_DRIVERS_PATH MESA_LOADER_DRIVER_OVERRIDE
+WLR_RENDERER=pixman
+GRATE_PREFIX=/opt/grate-mesa25-qualified-541e60b7ef948852be32f9d75c22f5f8aaa8e2e6e3548298aae2f4d0fc2c7815
+case "$SL101_DESKTOP_RENDERER" in
+  grate)
+    if [ "$(uname -r)" = 7.0.1-postmarketos-grate ] &&
+       (cd "$GRATE_PREFIX" && sha256sum -c runtime.sha256 >/dev/null 2>&1); then
+      WLR_RENDERER=gles2
+      LD_LIBRARY_PATH="$GRATE_PREFIX/lib"
+      GBM_BACKENDS_PATH="$GRATE_PREFIX/lib/gbm"
+      LIBGL_DRIVERS_PATH="$GRATE_PREFIX/lib"
+      MESA_LOADER_DRIVER_OVERRIDE=grate
+      export LD_LIBRARY_PATH GBM_BACKENDS_PATH LIBGL_DRIVERS_PATH MESA_LOADER_DRIVER_OVERRIDE
+    else
+      echo "sl101-desktop: Grate kernel/bundle unavailable; starting recovery pixman" >&2
+    fi
+    ;;
+  pixman) ;;
+  *) echo "invalid SL101_DESKTOP_RENDERER=$SL101_DESKTOP_RENDERER" >&2; exit 1 ;;
+esac
+export WLR_RENDERER
+printf 'sl101-desktop: requested=%s renderer=%s kernel=%s\n' "$SL101_DESKTOP_RENDERER" "$WLR_RENDERER" "$(uname -r)" >&2
+
+rm -f "$SL101_DBUS_SOCKET"
+dbus_pid=$(dbus-daemon --session --fork \
+  --address="unix:path=$SL101_DBUS_SOCKET" \
+  --print-pid=1)
+printf '%s\n' "$dbus_pid" >"$SL101_DBUS_PIDFILE"
+
+export DBUS_SESSION_BUS_ADDRESS="unix:path=$SL101_DBUS_SOCKET"
+
+if ! /usr/local/bin/sl101-audio-session start; then
+  echo "sl101-desktop: audio session failed; continuing desktop without managed audio" >&2
+fi
+
+# Keep the OpenRC/start-stop-daemon tracked PID stable across the wrapper:
+# after this exec, the service pidfile identifies labwc itself.
+if [ -n "${SL101_LABWC_CONFIG_DIR:-}" ]; then
+	exec labwc -V -C "$SL101_LABWC_CONFIG_DIR"
+fi
+exec labwc -V
