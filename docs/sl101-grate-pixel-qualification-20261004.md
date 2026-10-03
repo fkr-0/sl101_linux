@@ -97,3 +97,77 @@ a conditional 1:1 optimization if exact no-scale detection is proven.
 
 Archived device summaries live under
 `work/sl101-grate-ramp-20261004/device-evidence/`.
+
+## GL_LINEAR-preserving phase pass
+
+A bilinear fit of the accepted Grate strict-ramp framebuffer against the exact
+fixture oracle localizes the residual more precisely. Over 8,917 sampled failing
+pixels, the best constant subpixel model is approximately **+3/64 texel X and
+-2/64 texel Y**. Nearby grid points are measurably worse. This agrees with the
+previous observation that inferred adjacent-texel blend weights quantize in
+roughly 1/64 increments.
+
+A fuller affine fit shows the phase is not constant. The inferred field is
+approximately:
+
+    dx = -0.0320 + 0.08325 * (x / W)
+    dy = -0.0371 + 0.00367 * (x / W) + 0.03494 * (y / H)
+
+The X term therefore moves from about -0.032 texel at the left edge to +0.051
+at the right edge; Y similarly trends toward zero from top to bottom. Splitting
+the fit across plausible quad-triangle diagonals also changes the X slope
+materially, so MFU barycentric precision remains a live alternative to a pure
+viewport explanation.
+
+The viewport registers use 16x subpixel-space programming. Solving the affine
+field for the smallest viewport correction gives an experimental bias/scale
+candidate that keeps the requested linear sampler bits untouched:
+
+    X bias  +0.153 register units
+    Y bias  -0.285 register units
+    X scale +0.666 register units
+    Y scale +0.280 register units
+
+Candidate SHA256:
+`ee3f169c8e677de79177d056a119461d914f2879138a2dc9791acf3c6e54e79e`.
+It is staged at:
+`/opt/grate-mesa25-affinephase-ee3f169c8e677de79177d056a119461d914f2879138a2dc9791acf3c6e54e79e`.
+
+The earlier bias-only `+0.75/-0.5` candidate remains staged as a control but is
+superseded by this affine candidate for the next hardware gate.
+
+A second diagnostic keeps `GL_LINEAR` but bypasses the MFU perspective reciprocal
+and uses affine barycentric coefficients directly. Its SHA256 is
+`16d05d89c4ed431c183fb18967e671ee17548031a246e8917eda03d63b99ee0d`.
+This is diagnostic only because it is not generally correct for perspective
+varyings. If it fixes the ramp while the viewport-phase candidate does not, the
+remaining bug is specifically in the `r4` reciprocal/perspective path. If the
+viewport candidate wins, the fix belongs in rasterizer pixel-center/viewport
+phase instead.
+
+The Grate TGSI compiler also currently ignores declaration interpolation
+qualifiers when installing MFU barycentric setup. An interpolation-aware
+candidate now records TGSI interpolation metadata and distinguishes the two
+paths: LINEAR/noperspective uses raw affine barycentric coefficients, while
+PERSPECTIVE retains the canonical `rcp(r4)` multiplier. Unsupported locations
+and mixed LINEAR/PERSPECTIVE varyings in one MFU packet fail closed rather than
+silently miscompile.
+
+Both lowering contracts were cross-built for ARMv7 and executed CPU-only on the
+SL101 while the GPU qualification lock remained owned by the browser lane:
+
+    PASS tex-perspective: canonical rcp/barycentric/ipl MFU before TEX
+    PASS tex-linear: affine barycentric MFU before TEX
+
+This validates the compiler-side distinction without claiming that it explains
+the current fullscreen ramp; ordinary GLSL smooth varyings are perspective by
+default, so the live GPU gate still decides between viewport phase and MFU
+perspective behavior.
+
+### Current live-device gate
+
+Live hardware execution is temporarily blocked by the intentionally exclusive
+Cog/WPE software-review process, which holds
+`/run/lock/sl101-nura-qualification.lock` until its browser window is closed.
+The phase and MFU candidates are staged in distinct `/opt` prefixes but have not
+been promoted or substituted for the desktop renderer. Do not bypass that lock.
