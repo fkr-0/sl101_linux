@@ -140,10 +140,11 @@ A second diagnostic keeps `GL_LINEAR` but bypasses the MFU perspective reciproca
 and uses affine barycentric coefficients directly. Its SHA256 is
 `16d05d89c4ed431c183fb18967e671ee17548031a246e8917eda03d63b99ee0d`.
 This is diagnostic only because it is not generally correct for perspective
-varyings. If it fixes the ramp while the viewport-phase candidate does not, the
-remaining bug is specifically in the `r4` reciprocal/perspective path. If the
-viewport candidate wins, the fix belongs in rasterizer pixel-center/viewport
-phase instead.
+varyings. Hardware testing rejected it decisively: the fixture failed before
+pixel comparison because it never produced two stable nonblank captures. The
+visible desktop survived and recent kernel logs showed no matching GPU
+fault/reset/timeout. Therefore the perspective reciprocal/barycentric path is
+necessary; the fix must refine its precision/phase rather than bypass it.
 
 The Grate TGSI compiler also currently ignores declaration interpolation
 qualifiers when installing MFU barycentric setup. An interpolation-aware
@@ -164,10 +165,36 @@ the current fullscreen ramp; ordinary GLSL smooth varyings are perspective by
 default, so the live GPU gate still decides between viewport phase and MFU
 perspective behavior.
 
-### Current live-device gate
+### Hardware results after releasing the browser qualification lock
 
-Live hardware execution is temporarily blocked by the intentionally exclusive
-Cog/WPE software-review process, which holds
-`/run/lock/sl101-nura-qualification.lock` until its browser window is closed.
-The phase and MFU candidates are staged in distinct `/opt` prefixes but have not
-been promoted or substituted for the desktop renderer. Do not bypass that lock.
+The user authorized closing the active Cog/WPE software review. Its process group
+was terminated cleanly and `/run/lock/sl101-nura-qualification.lock` became
+free before the GPU tests. No default renderer or persistent service setting was
+changed.
+
+The affine viewport candidate
+`ee3f169c8e677de79177d056a119461d914f2879138a2dc9791acf3c6e54e79e`
+kept `GL_LINEAR` and completed the strict ramp gate, but only changed wrong
+pixels from the accepted baseline 135,476 to **133,310 / 921,600**. More
+importantly, maximum channel error rose to **201** (baseline 34). Mean channel
+error was about 0.369. There were no new kernel faults and visible desktop PID
+15243 survived. This candidate is rejected: viewport bias/scale is not the
+primary defect and the correction worsens edge/discontinuity behavior.
+
+The MFU perspective-bypass candidate
+`16d05d89c4ed431c183fb18967e671ee17548031a246e8917eda03d63b99ee0d`
+also preserved the sampler's linear filtering, but failed before comparison:
+`fixture did not produce two stable nonblank captures`. The qualification lock
+was released afterward, visible desktop PID 15243 remained alive, the desktop
+service remained started, and recent kernel logs contained no matching Grate/
+GR3D/host1x fault, reset, or timeout. This rejects "remove rcp(r4)" as a fix.
+
+The next source-level target is therefore the **perspective MFU interpolation
+precision/phase itself**: reciprocal input convention, barycentric coefficient
+precision/packing, or the varying interpolation row path. `NEAREST` remains only
+the exact 1:1 control oracle.
+
+Archived evidence:
+
+- `work/sl101-grate-ramp-20261004/device-evidence/affinephase-strict-summary.json`
+- `work/sl101-grate-ramp-20261004/device-evidence/mfubypass-strict-result.txt`
