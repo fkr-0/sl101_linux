@@ -1,0 +1,39 @@
+Subject: [PATCH] ARM: tegra: Add embedded controller to ASUS SL101
+
+The ASUS Eee Pad Slider SL101 has an embedded controller for its
+built-in sliding keyboard.
+
+Describe the EC on the PTA/GEN2 I2C mux leg. The EC responds at 0x19,
+with DockRAM at 0x1b. AP_WAKE is GPIO S2 and EC_REQUEST is GPIO S3.
+
+The node has been tested on a physical SL101 with EC model
+ASUS-EP102-DOCK and firmware SL101-0202. With the ASUS Transformer EC
+MFD/serio driver and the SL101 event-protocol fixups, the built-in
+keyboard works through serio/atkbd.
+
+This patch depends on the ASUS Transformer EC binding that provides the
+"asus,sl101-ec-dock" compatible.
+
+---
+ arch/arm/boot/dts/nvidia/tegra20-asus-sl101.dts | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+--- a/arch/arm/boot/dts/nvidia/tegra20-asus-sl101.dts
++++ b/arch/arm/boot/dts/nvidia/tegra20-asus-sl101.dts
+@@ -59,3 +59,16 @@
+ 		};
+ 	};
+ };
++
++&lvds_ddc {
++	embedded-controller@19 {
++		compatible = "asus,sl101-ec-dock";
++		reg = <0x19>, <0x1b>;
++		reg-names = "ec", "dockram";
++
++		interrupt-parent = <&gpio>;
++		interrupts = <TEGRA_GPIO(S, 2) IRQ_TYPE_LEVEL_LOW>;
++
++		request-gpios = <&gpio TEGRA_GPIO(S, 3) GPIO_ACTIVE_LOW>;
++	};
++};

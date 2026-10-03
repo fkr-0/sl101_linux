@@ -1,0 +1,10 @@
+[Unit]
+Description=Unblank SL101 framebuffer and backlight after Tegra DRM probe
+After=modprobe@drm.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -ec 'i=0; until [ -e /sys/class/graphics/fb0/blank ] && [ -e /sys/class/backlight/backlight/bl_power ]; do i=$((i + 1)); [ "$i" -ge 100 ] && exit 1; sleep 0.1; done; printf 0 > /sys/class/graphics/fb0/blank; printf 0 > /sys/class/backlight/backlight/bl_power'
+
+[Install]
+WantedBy=multi-user.target

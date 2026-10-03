@@ -1,0 +1,259 @@
+--- a/gallium/drivers/grate/grate_program.c
++++ b/gallium/drivers/grate/grate_program.c
+@@ -75,6 +75,8 @@
+    so->blob.commands = commands;
+    so->blob.num_commands = num_commands;
+    so->output_mask = vp.output_mask;
++   so->num_immediates = vp.num_immediates;
++   memcpy(so->immediates, vp.immediates, vp.num_immediates * sizeof(vp.immediates[0]));
+ 
+    return so;
+ }
+--- a/gallium/drivers/grate/grate_program.h
++++ b/gallium/drivers/grate/grate_program.h
+@@ -15,6 +15,8 @@
+    struct pipe_shader_state base;
+    struct grate_shader_blob blob;
+    uint16_t output_mask;
++   unsigned num_immediates;
++   uint32_t immediates[256][4];
+ };
+ 
+ struct grate_fragment_shader_state {
+--- a/gallium/drivers/grate/grate_compiler.h
++++ b/gallium/drivers/grate/grate_compiler.h
+@@ -10,6 +10,8 @@
+ struct grate_vp_shader {
+    struct list_head instructions;
+    uint16_t output_mask;
++   unsigned num_immediates;
++   uint32_t immediates[256][4];
+ };
+ 
+ struct grate_fp_info {
+@@ -27,6 +29,8 @@
+    struct list_head alu_instructions;
+    struct list_head mfu_instructions;
+    struct grate_fp_info info;
++   unsigned num_immediates;
++   float immediates[256][4];
+ };
+ 
+ void
+--- a/gallium/drivers/grate/grate_screen.c
++++ b/gallium/drivers/grate/grate_screen.c
+@@ -168,7 +168,8 @@
+    caps->constant_buffer_offset_alignment = 4;
+    caps->min_map_buffer_alignment = 0;
+    caps->texture_buffer_offset_alignment = 0;
+-   caps->texture_transfer_modes = PIPE_TEXTURE_TRANSFER_BLIT;
++   /* Linear BOs support CPU texture mapping directly. */
++   caps->texture_transfer_modes = PIPE_TEXTURE_TRANSFER_DEFAULT;
+    caps->max_texel_buffer_elements = 0;
+    caps->max_viewports = 1;
+    caps->max_geometry_output_vertices = 0;
+--- a/gallium/drivers/grate/grate_state.c
++++ b/gallium/drivers/grate/grate_state.c
+@@ -25,6 +25,22 @@
+                       unsigned int sample_mask)
+ {
+    unimplemented();
++}
++
++/* Mesa 25's CSO cleanup calls this setter even when stencil is unused.
++ * Keep the dynamic state; legacy grate does not yet emit stencil commands.
++ */
++/* Retain blend constants; legacy grate blend emission remains unimplemented. */
++static void
++grate_set_blend_color(struct pipe_context *pcontext, const struct pipe_blend_color *color)
++{
++   grate_context(pcontext)->blend_color = *color;
++}
++
++static void
++grate_set_stencil_ref(struct pipe_context *pcontext, struct pipe_stencil_ref ref)
++{
++   grate_context(pcontext)->stencil_ref = ref;
+ }
+ 
+ static void
+@@ -197,6 +213,8 @@
+ grate_context_state_init(struct pipe_context *pcontext)
+ {
+    pcontext->set_sample_mask = grate_set_sample_mask;
++   pcontext->set_stencil_ref = grate_set_stencil_ref;
++   pcontext->set_blend_color = grate_set_blend_color;
+    pcontext->set_constant_buffer = grate_set_constant_buffer;
+    pcontext->set_framebuffer_state = grate_set_framebuffer_state;
+    pcontext->set_polygon_stipple = grate_set_polygon_stipple;
+@@ -545,9 +563,13 @@
+       grate_stream_push(stream, rt_params);
+    }
+ 
+-   grate_stream_push(stream, host1x_opcode_incr(TGR3D_RT_PTR(0), fb->num_rts));
+-   for (i = 0; i < fb->num_rts; ++i)
++   /* Disabled render targets have no BO and must not generate relocations. */
++   for (i = 0; i < fb->num_rts; ++i) {
++      if (!fb->bos[i])
++         continue;
++      grate_stream_push(stream, host1x_opcode_incr(TGR3D_RT_PTR(i), 1));
+       grate_stream_push_reloc(stream, fb->bos[i], 0);
++   }
+ 
+    grate_stream_push(stream, host1x_opcode_incr(TGR3D_RT_ENABLE, 1));
+    grate_stream_push(stream, fb->mask);
+@@ -601,6 +623,18 @@
+ }
+ 
+ static void
++emit_vs_immediates(struct grate_context *context)
++{
++   struct grate_vertex_shader_state *vs = context->vshader;
++   struct grate_stream *stream = &context->gr3d->stream;
++   for (unsigned i = 0; i < vs->num_immediates; i++) {
++      grate_stream_push(stream, host1x_opcode_imm(TGR3D_VP_UPLOAD_CONST_ID, (255 - i) * 4));
++      grate_stream_push(stream, host1x_opcode_nonincr(TGR3D_VP_UPLOAD_CONST, 4));
++      grate_stream_push_words(stream, vs->immediates[i], 4, 0);
++   }
++}
++
++static void
+ emit_shader(struct grate_stream *stream, struct grate_shader_blob *blob)
+ {
+    grate_stream_push_words(stream, blob->commands, blob->num_commands, 0);
+@@ -622,16 +656,16 @@
+ 
+    /* depends on linking */
+    struct grate_fp_info *info = &context->fshader->info;
+-   assert(info->num_inputs > 0);
++   unsigned num_linker_inputs = MAX2(info->num_inputs, 1);
+    cull_face_linker_setup |= TGR3D_VAL(CULL_FACE_LINKER_SETUP,
+                                        LINKER_INST_COUNT,
+-                                       info->num_inputs - 1);
++                                       num_linker_inputs - 1);
+ 
+    assert(info->num_inputs <= 16);
+-   uint32_t linker_insts[3 + 16 * 2];
++   uint32_t linker_insts[3 + 16 * 2] = {0};
+    linker_insts[0] = host1x_opcode_incr(TGR3D_CULL_FACE_LINKER_SETUP, 1);
+    linker_insts[1] = cull_face_linker_setup;
+-   linker_insts[2] = host1x_opcode_incr(TGR3D_LINKER_INSTRUCTION(0), info->num_inputs * 2);
++   linker_insts[2] = host1x_opcode_incr(TGR3D_LINKER_INSTRUCTION(0), num_linker_inputs * 2);
+ 
+    for (int i = 0; i < info->num_inputs; ++i) {
+       linker_insts[3 + i * 2] = info->inputs[i].src;
+@@ -642,7 +676,7 @@
+       linker_insts[3 + info->color_input * 2 + 1] |= 0xf << 16;
+ 
+    grate_stream_push_words(stream, linker_insts,
+-                           3 + info->num_inputs * 2, 0);
++                           3 + num_linker_inputs * 2, 0);
+ }
+ 
+ void
+@@ -655,6 +689,7 @@
+    emit_zsa_state(context);
+    emit_attribs(context);
+    emit_vs_uniforms(context);
++   emit_vs_immediates(context);
+    emit_program(context);
+ }
+ 
+--- a/gallium/drivers/grate/grate_context.h
++++ b/gallium/drivers/grate/grate_context.h
+@@ -43,6 +43,8 @@
+    struct grate_vertexbuf_state vbs;
+    struct pipe_constant_buffer constant_buffer[PIPE_SHADER_TYPES];
+ 
++   struct pipe_stencil_ref stencil_ref;
++   struct pipe_blend_color blend_color;
+    struct grate_zsa_state *zsa;
+    struct grate_rasterizer_state *rast;
+ 
+--- a/gallium/drivers/grate/grate_draw.c
++++ b/gallium/drivers/grate/grate_draw.c
+@@ -78,7 +78,7 @@
+    }
+ 
+    if (info->instance_count != 1 || info->start_instance ||
+-       trimmed.index_bias != 0) {
++       (info->index_size && trimmed.index_bias != 0)) {
+       unimplemented();
+       return;
+    }
+--- a/gallium/drivers/grate/vp/tgsi.c
++++ b/gallium/drivers/grate/vp/tgsi.c
+@@ -245,8 +245,8 @@
+       return src_temp(src->Index, swizzle, negate, absolute);
+ 
+    case TGSI_FILE_IMMEDIATE:
+-      /* HACK: allocate uniforms from the top for immediates; need to actually record these */
+-      return uniform(1023 - src->Index, swizzle, negate, absolute);
++      /* Reserve the high vector-uniform slots for shader immediates. */
++      return uniform(255 - src->Index, swizzle, negate, absolute);
+ 
+    default:
+       unreachable("unsupported input!");
+@@ -321,10 +321,17 @@
+ {
+    list_inithead(&vp->instructions);
+    vp->output_mask = 0;
++   vp->num_immediates = 0;
+ 
+    while (!tgsi_parse_end_of_tokens(tgsi)) {
+       tgsi_parse_token(tgsi);
+       switch (tgsi->FullToken.Token.Type) {
++      case TGSI_TOKEN_TYPE_IMMEDIATE:
++         assert(vp->num_immediates < 256);
++         for (unsigned c = 0; c < 4; c++)
++            vp->immediates[vp->num_immediates][c] = tgsi->FullToken.FullImmediate.u[c].Uint;
++         vp->num_immediates++;
++         break;
+       case TGSI_TOKEN_TYPE_INSTRUCTION:
+          if (tgsi->FullToken.FullInstruction.Instruction.Opcode != TGSI_OPCODE_END) {
+             struct vp_instr *instr = tgsi_to_vp(vp, &tgsi->FullToken.FullInstruction);
+--- a/gallium/drivers/grate/fp/tgsi.c
++++ b/gallium/drivers/grate/fp/tgsi.c
+@@ -121,6 +121,15 @@
+          mfu->var[i].tram_row = src->Index;
+          fp->info.max_tram_row = MAX2(fp->info.max_tram_row, src->Index);
+          src0 = fp_alu_src_row(comp);
++      } else if (src->File == TGSI_FILE_IMMEDIATE) {
++         assert(src->Index < fp->num_immediates);
++         float value = fp->immediates[src->Index][comp];
++         if (value == 0.0f)
++            src0 = fp_alu_src_zero();
++         else if (value == 1.0f)
++            src0 = fp_alu_src_one();
++         else
++            unreachable("unsupported fragment immediate value");
+       } else
+          src0 = fp_alu_src_reg(src->Index + comp);
+ 
+@@ -208,10 +217,17 @@
+    fp->info.num_inputs = 0;
+    fp->info.color_input = -1;
+    fp->info.max_tram_row = 1;
++   fp->num_immediates = 0;
+ 
+    while (!tgsi_parse_end_of_tokens(tgsi)) {
+       tgsi_parse_token(tgsi);
+       switch (tgsi->FullToken.Token.Type) {
++      case TGSI_TOKEN_TYPE_IMMEDIATE:
++         assert(fp->num_immediates < 256);
++         for (unsigned c = 0; c < 4; c++)
++            fp->immediates[fp->num_immediates][c] = tgsi->FullToken.FullImmediate.u[c].Float;
++         fp->num_immediates++;
++         break;
+       case TGSI_TOKEN_TYPE_DECLARATION:
+          emit_tgsi_declaration(fp, &tgsi->FullToken.FullDeclaration);
+          break;
+@@ -228,6 +244,8 @@
+     * This will overwrite instructions in some cases, need proper scheduler
+     * to fix properly
+     */
++    if (list_is_empty(&fp->mfu_instructions))
++       return;
+     struct fp_mfu_instr *first = list_first_entry(&fp->mfu_instructions, struct fp_mfu_instr, link);
+     first->sfu.op = FP_SFU_OP_RCP;
+     first->sfu.reg = 4;

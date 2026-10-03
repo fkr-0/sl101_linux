@@ -1,0 +1,124 @@
+#!/bin/sh
+set -eu
+run=/run/sl101-audio
+root_runtime=/run/user/0
+browser_runtime=/run/user/1000
+logdir=/var/log/sl101-audio
+dbus=unix:path=/run/user/0/sl101-desktop-bus
+
+mkdir_runtime() {
+    mkdir -p "$run" "$root_runtime" "$browser_runtime" "$logdir"
+    chmod 0755 "$run"
+    chown 1000:1000 "$browser_runtime"
+    chmod 0700 "$browser_runtime"
+}
+
+alive() {
+    [ -r "$1" ] || return 1
+    pid=$(cat "$1" 2>/dev/null || true)
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
+start_root() {
+    mkdir_runtime
+    export HOME=/root XDG_RUNTIME_DIR="$root_runtime" PIPEWIRE_RUNTIME_DIR="$root_runtime"
+    export DBUS_SESSION_BUS_ADDRESS="$dbus"
+
+    if ! alive "$run/pipewire.pid"; then
+        nohup /usr/bin/pipewire >>"$logdir/pipewire.log" 2>&1 &
+        echo $! >"$run/pipewire.pid"
+    fi
+    i=0
+    while [ ! -S "$root_runtime/pipewire-0" ]; do
+        i=$((i+1)); [ "$i" -lt 50 ] || { echo "sl101-audio: PipeWire sockets unavailable" >&2; return 1; }
+        sleep 0.1
+    done
+
+    if ! alive "$run/wireplumber.pid"; then
+        nohup /usr/bin/wireplumber >>"$logdir/wireplumber.log" 2>&1 &
+        echo $! >"$run/wireplumber.pid"
+    fi
+
+    if ! alive "$run/pipewire-pulse-root.pid"; then
+        nohup /usr/bin/pipewire-pulse >>"$logdir/pipewire-pulse-root.log" 2>&1 &
+        echo $! >"$run/pipewire-pulse-root.pid"
+    fi
+
+    i=0
+    until pactl info >/dev/null 2>&1; do
+        i=$((i+1)); [ "$i" -lt 50 ] || { echo "sl101-audio: root Pulse server unavailable" >&2; return 1; }
+        sleep 0.1
+    done
+    i=0
+    while [ ! -S "$run/pulse-browser" ]; do
+        i=$((i+1)); [ "$i" -lt 50 ] || { echo "sl101-audio: browser Pulse listener unavailable" >&2; return 1; }
+        sleep 0.1
+    done
+    chown root:1000 "$run/pulse-browser"
+    chmod 0660 "$run/pulse-browser"
+
+    # WM8903 is the tablet speaker/headphone codec. Its packaged UCM data is
+    # usable through hw:0 but is not selected by this PipeWire/ACP build, so
+    # use the stable pro-audio PCM and preserve the already-qualified mixer state.
+    i=0
+    until pactl list short cards | grep -q 'alsa_card.platform-sound'; do
+        i=$((i+1)); [ "$i" -lt 80 ] || { echo "sl101-audio: WM8903 card unavailable" >&2; return 1; }
+        sleep 0.1
+    done
+    pactl set-card-profile alsa_card.platform-sound pro-audio
+    i=0
+    until pactl list short sinks | grep -q 'alsa_output.platform-sound.pro-output-0'; do
+        i=$((i+1)); [ "$i" -lt 30 ] || { echo "sl101-audio: WM8903 sink unavailable" >&2; return 1; }
+        sleep 0.1
+    done
+    pactl set-default-sink alsa_output.platform-sound.pro-output-0
+    pactl set-sink-volume alsa_output.platform-sound.pro-output-0 35%
+}
+
+start_browser_bridge() {
+    [ -S "$run/pulse-browser" ] || { echo "sl101-audio: browser Pulse listener unavailable" >&2; return 1; }
+    chown root:1000 "$run/pulse-browser"
+    chmod 0660 "$run/pulse-browser"
+    setpriv --reuid=1000 --regid=1000 --clear-groups \
+        env -i PATH=/usr/bin:/bin HOME=/tmp XDG_RUNTIME_DIR=/tmp \
+        PULSE_SERVER=unix:$run/pulse-browser pactl info >/dev/null
+}
+
+stop_pidfile() {
+    file=$1
+    if alive "$file"; then
+        pid=$(cat "$file")
+        kill "$pid" 2>/dev/null || true
+        i=0
+        while kill -0 "$pid" 2>/dev/null; do
+            i=$((i+1)); [ "$i" -lt 30 ] || { kill -9 "$pid" 2>/dev/null || true; break; }
+            sleep 0.1
+        done
+    fi
+    rm -f "$file"
+}
+
+stop_all() {
+    stop_pidfile "$run/pipewire-pulse-root.pid"
+    stop_pidfile "$run/wireplumber.pid"
+    stop_pidfile "$run/pipewire.pid"
+}
+
+status_all() {
+    export HOME=/root XDG_RUNTIME_DIR="$root_runtime" PIPEWIRE_RUNTIME_DIR="$root_runtime"
+    export DBUS_SESSION_BUS_ADDRESS="$dbus"
+    printf 'pipewire='; alive "$run/pipewire.pid" && echo running || echo stopped
+    printf 'wireplumber='; alive "$run/wireplumber.pid" && echo running || echo stopped
+    printf 'pulse-root='; alive "$run/pipewire-pulse-root.pid" && echo running || echo stopped
+    printf 'pulse-browser-socket='; [ -S "$run/pulse-browser" ] && echo ready || echo missing
+    pactl info 2>/dev/null | grep -E 'Server Name|Default Sink' || true
+    wpctl status 2>/dev/null | sed -n '1,70p' || true
+}
+
+case "${1:-}" in
+    start) start_root; start_browser_bridge ;;
+    stop) stop_all ;;
+    restart) stop_all; start_root; start_browser_bridge ;;
+    status) status_all ;;
+    *) echo "usage: $0 {start|stop|restart|status}" >&2; exit 2 ;;
+esac

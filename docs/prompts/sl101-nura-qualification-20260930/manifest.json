@@ -1,0 +1,154 @@
+[
+  {
+    "lane": "review",
+    "title": "Full implementation review",
+    "task": "SL101-NURA-REVIEW-20260930",
+    "prompt": "sl101-nura-review-20260930-v1",
+    "file": "docs/prompts/sl101-nura-qualification-20260930/review.md",
+    "output": "tmp/sl101-nura/qualification/review"
+  },
+  {
+    "lane": "boot",
+    "title": "Boot and recovery qualification",
+    "task": "SL101-NURA-BOOT-20260930",
+    "prompt": "sl101-nura-boot-20260930-v1",
+    "file": "docs/prompts/sl101-nura-qualification-20260930/boot.md",
+    "output": "tmp/sl101-nura/qualification/boot"
+  },
+  {
+    "lane": "storage",
+    "title": "Storage and filesystem qualification",
+    "task": "SL101-NURA-STORAGE-20260930",
+    "prompt": "sl101-nura-storage-20260930-v1",
+    "file": "docs/prompts/sl101-nura-qualification-20260930/storage.md",
+    "output": "tmp/sl101-nura/qualification/storage"
+  },
+  {
+    "lane": "network",
+    "title": "Wi-Fi DHCP routing SSH qualification",
+    "task": "SL101-NURA-NETWORK-20260930",
+    "prompt": "sl101-nura-network-20260930-v1",
+    "file": "docs/prompts/sl101-nura-qualification-20260930/network.md",
+    "output": "tmp/sl101-nura/qualification/network"
+  },
+  {
+    "lane": "input",
+    "title": "Keyboard touch and slider qualification",
+    "task": "SL101-NURA-INPUT-20260930",
+    "prompt": "sl101-nura-input-20260930-v1",
+    "file": "docs/prompts/sl101-nura-qualification-20260930/input.md",
+    "output": "tmp/sl101-nura/qualification/input"
+  },
+  {
+    "lane": "display",
+    "title": "Display backlight and DRM qualification",
+    "task": "SL101-NURA-DISPLAY-20260930",
+    "prompt": "sl101-nura-display-20260930-v1",
+    "file": "docs/prompts/sl101-nura-qualification-20260930/display.md",
+    "output": "tmp/sl101-nura/qualification/display"
+  },
+  {
+    "lane": "audio",
+    "title": "ALSA PipeWire Pulse audio qualification",
+    "task": "SL101-NURA-AUDIO-20260930",
+    "prompt": "sl101-nura-audio-20260930-v1",
+    "file": "docs/prompts/sl101-nura-qualification-20260930/audio.md",
+    "output": "tmp/sl101-nura/qualification/audio"
+  },
+  {
+    "lane": "bluetooth",
+    "title": "Bluetooth qualification",
+    "task": "SL101-NURA-BLUETOOTH-20260930",
+    "prompt": "sl101-nura-bluetooth-20260930-v1",
+    "file": "docs/prompts/sl101-nura-qualification-20260930/bluetooth.md",
+    "output": "tmp/sl101-nura/qualification/bluetooth"
+  },
+  {
+    "lane": "power",
+    "title": "Battery charging and thermal qualification",
+    "task": "SL101-NURA-POWER-20260930",
+    "prompt": "sl101-nura-power-20260930-v1",
+    "file": "docs/prompts/sl101-nura-qualification-20260930/power.md",
+    "output": "tmp/sl101-nura/qualification/power"
+  },
+  {
+    "lane": "suspend",
+    "title": "Suspend resume qualification",
+    "task": "SL101-NURA-SUSPEND-20260930",
+    "prompt": "sl101-nura-suspend-20260930-v1",
+    "file": "docs/prompts/sl101-nura-qualification-20260930/suspend.md",
+    "output": "tmp/sl101-nura/qualification/suspend"
+  },
+  {
+    "lane": "usb",
+    "title": "USB host and gadget qualification",
+    "task": "SL101-NURA-USB-20260930",
+    "prompt": "sl101-nura-usb-20260930-v1",
+    "file": "docs/prompts/sl101-nura-qualification-20260930/usb.md",
+    "output": "tmp/sl101-nura/qualification/usb"
+  },
+  {
+    "lane": "sensors-camera",
+    "title": "Sensors RTC and camera capability audit",
+    "task": "SL101-NURA-SENSORS-CAMERA-20260930",
+    "prompt": "sl101-nura-sensors-camera-20260930-v1",
+    "file": "docs/prompts/sl101-nura-qualification-20260930/sensors-camera.md",
+    "output": "tmp/sl101-nura/qualification/sensors-camera"
+  },
+  {
+    "lane": "os-services",
+    "title": "Nura OS and services qualification",
+    "task": "SL101-NURA-OS-SERVICES-20260930",
+    "prompt": "sl101-nura-os-services-20260930-v1",
+    "file": "docs/prompts/sl101-nura-qualification-20260930/os-services.md",
+    "output": "tmp/sl101-nura/qualification/os-services"
+  },
+  {
+    "lane": "gpu",
+    "title": "GPU implementation qualification",
+    "task": "SL101-NURA-GPU-20260930",
+    "prompt": "sl101-nura-gpu-20260930-v1",
+    "file": "docs/prompts/sl101-nura-qualification-20260930/gpu.md",
+    "output": "tmp/sl101-nura/qualification/gpu"
+  },
+  {
+    "lane": "desktop-browser",
+    "title": "Desktop and browser qualification",
+    "task": "SL101-NURA-DESKTOP-BROWSER-20260930",
+    "prompt": "sl101-nura-desktop-browser-20260930-v1",
+    "file": "docs/prompts/sl101-nura-qualification-20260930/desktop-browser.md",
+    "output": "tmp/sl101-nura/qualification/desktop-browser"
+  },
+  {
+    "lane": "repro-build",
+    "title": "Reproducible build and artifact qualification",
+    "task": "SL101-NURA-REPRO-BUILD-20260930",
+    "prompt": "sl101-nura-repro-build-20260930-v1",
+    "file": "docs/prompts/sl101-nura-qualification-20260930/repro-build.md",
+    "output": "tmp/sl101-nura/qualification/repro-build"
+  },
+  {
+    "lane": "organize",
+    "title": "Organize SL101 Nura project",
+    "task": "SL101-NURA-ORGANIZE-20260930",
+    "prompt": "sl101-nura-organize-20260930-v1",
+    "file": "docs/prompts/sl101-nura-qualification-20260930/organize.md",
+    "output": "tmp/sl101-nura/qualification/organize"
+  },
+  {
+    "lane": "blog",
+    "title": "Draft SL101 Nura series article",
+    "task": "SL101-NURA-BLOG-20260930",
+    "prompt": "sl101-nura-blog-20260930-v1",
+    "file": "docs/prompts/sl101-nura-qualification-20260930/blog.md",
+    "output": "tmp/sl101-nura/qualification/blog"
+  },
+  {
+    "lane": "de-options",
+    "title": "Explore touch desktop options",
+    "task": "SL101-NURA-DE-OPTIONS-20260930",
+    "prompt": "sl101-nura-de-options-20260930-v1",
+    "file": "docs/prompts/sl101-nura-qualification-20260930/de-options.md",
+    "output": "tmp/sl101-nura/qualification/de-options"
+  }
+]

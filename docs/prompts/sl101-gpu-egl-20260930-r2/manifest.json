@@ -1,0 +1,42 @@
+[
+  {
+    "lane": "texture",
+    "task": "SL101-GRATE-TEXTURE-20260930",
+    "prompt": "sl101-grate-texture-20260930-v1",
+    "title": "Tegra20 texture sampling and sampler state",
+    "file": "docs/prompts/sl101-gpu-egl-20260930-r2/texture.md",
+    "reuse": true,
+    "write_scope": "tmp/sl101-nura/gpu-egl-20260930-r2/texture/**",
+    "priority": 95
+  },
+  {
+    "lane": "arithmetic",
+    "task": "SL101-GRATE-ARITHMETIC-20260930",
+    "prompt": "sl101-grate-arithmetic-20260930-v1",
+    "title": "Tegra20 fragment ALU and actual wlroots shader semantics",
+    "file": "docs/prompts/sl101-gpu-egl-20260930-r2/arithmetic.md",
+    "reuse": true,
+    "write_scope": "tmp/sl101-nura/gpu-egl-20260930-r2/arithmetic/**",
+    "priority": 95
+  },
+  {
+    "lane": "egl",
+    "task": "SL101-GRATE-EGL-20260930-R2",
+    "prompt": "sl101-grate-egl-20260930-r2-v1",
+    "title": "Strict EGL, r5 crash diagnosis, integrated hardware acceleration",
+    "file": "docs/prompts/sl101-gpu-egl-20260930-r2/egl.md",
+    "reuse": false,
+    "write_scope": "tmp/sl101-nura/gpu-egl-20260930-r2/egl/**",
+    "priority": 95
+  },
+  {
+    "lane": "review",
+    "task": "SL101-GRATE-GPU-REVIEW-20260930-R2",
+    "prompt": "sl101-grate-gpu-review-20260930-r2-v1",
+    "title": "Independent review and continuation supervision for genuine GPU EGL",
+    "file": "docs/prompts/sl101-gpu-egl-20260930-r2/review.md",
+    "reuse": false,
+    "write_scope": "tmp/sl101-nura/gpu-egl-20260930-r2/review/**",
+    "priority": 95
+  }
+]

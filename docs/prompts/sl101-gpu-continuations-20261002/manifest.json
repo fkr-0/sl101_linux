@@ -1,0 +1,42 @@
+[
+  {
+    "lane": "texture",
+    "task": "SL101-GRATE-TEXTURE-CONT-20261002",
+    "prompt": "sl101-grate-texture-cont-20261002-v1",
+    "parent": "SL101-GRATE-TEXTURE-20260930",
+    "file": "docs/prompts/sl101-gpu-continuations-20261002/texture.md",
+    "title": "SL101 texture continuation: resolve deployment blockers",
+    "write_scope": "tmp/sl101-nura/gpu-continuations-20261002/texture/**",
+    "priority": 95
+  },
+  {
+    "lane": "arithmetic",
+    "task": "SL101-GRATE-ARITHMETIC-CONT-20261002",
+    "prompt": "sl101-grate-arithmetic-cont-20261002-v1",
+    "parent": "SL101-GRATE-ARITHMETIC-20260930",
+    "file": "docs/prompts/sl101-gpu-continuations-20261002/arithmetic.md",
+    "title": "SL101 arithmetic continuation: resolve deployment blockers",
+    "write_scope": "tmp/sl101-nura/gpu-continuations-20261002/arithmetic/**",
+    "priority": 95
+  },
+  {
+    "lane": "egl",
+    "task": "SL101-GRATE-EGL-CONT-20261002",
+    "prompt": "sl101-grate-egl-cont-20261002-v1",
+    "parent": "SL101-GRATE-EGL-20260930-R2",
+    "file": "docs/prompts/sl101-gpu-continuations-20261002/egl.md",
+    "title": "SL101 egl continuation: resolve deployment blockers",
+    "write_scope": "tmp/sl101-nura/gpu-continuations-20261002/egl/**",
+    "priority": 95
+  },
+  {
+    "lane": "review",
+    "task": "SL101-GRATE-REVIEW-CONT-20261002",
+    "prompt": "sl101-grate-review-cont-20261002-v1",
+    "parent": "SL101-GRATE-GPU-REVIEW-20260930-R2",
+    "file": "docs/prompts/sl101-gpu-continuations-20261002/review.md",
+    "title": "SL101 review continuation: resolve deployment blockers",
+    "write_scope": "tmp/sl101-nura/gpu-continuations-20261002/review/**",
+    "priority": 95
+  }
+]

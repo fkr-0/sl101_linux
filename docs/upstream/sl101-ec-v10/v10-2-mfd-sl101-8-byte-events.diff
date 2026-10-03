@@ -1,0 +1,69 @@
+Subject: [PATCH fixup v10 2/7] mfd: asus-transformer-ec: use 8-byte event reads on SL101
+
+The SL101 embedded controller exposes the event window at 0x6a through
+8-byte reads. This matches the downstream ASUS SL101 driver, which uses
+an 8-byte SMBus I2C block read for command responses and events.
+
+The generic 32-byte event read used by v10 prevents the physical SL101
+keyboard from completing PS/2 initialization.
+
+Use a variant-specific event read length for the SL101 in both the
+clear-buffer and interrupt paths. Keep the 32-byte entry size for other
+variants.
+
+Tested on an ASUS Eee Pad Slider SL101 with EC firmware SL101-0202.
+With the matching serio fixup, the built-in keyboard completes atkbd
+initialization and works.
+
+---
+ drivers/mfd/asus-transformer-ec.c | 19 +++++++++++++++----
+ 1 file changed, 15 insertions(+), 4 deletions(-)
+
+--- a/drivers/mfd/asus-transformer-ec.c
++++ b/drivers/mfd/asus-transformer-ec.c
+@@ -229,8 +229,18 @@
+ 	return ret;
+ }
+ 
++static size_t asus_ec_read_size(const struct asus_ec_data *ddata)
++{
++	/* SL101 firmware exposes an 8-byte event window at 0x6a. */
++	if (ddata->info->variant == ASUSEC_SL101_DOCK)
++		return 8;
++
++	return ASUSEC_ENTRY_SIZE;
++}
++
+ static void asus_ec_clear_buffer(struct asus_ec_data *ddata)
+ {
++	size_t read_size = asus_ec_read_size(ddata);
+ 	int ret, retry = ASUSEC_RSP_BUFFER_SIZE;
+ 
+ 	/*
+@@ -239,8 +249,8 @@
+ 	 */
+ 	while (retry--) {
+ 		ret = i2c_smbus_read_i2c_block_data(ddata->client, ASUSEC_READ_BUF,
+-						    ASUSEC_ENTRY_SIZE, ddata->ec_buf);
+-		if (ret < ASUSEC_ENTRY_SIZE)
++						    read_size, ddata->ec_buf);
++		if (ret < read_size)
+ 			continue;
+ 
+ 		if (ddata->ec_buf[ASUSEC_IRQ_STATUS] & ASUSEC_OBF_MASK)
+@@ -318,12 +328,13 @@
+ static irqreturn_t asus_ec_interrupt(int irq, void *dev_id)
+ {
+ 	struct asus_ec_data *ddata = dev_id;
++	size_t read_size = asus_ec_read_size(ddata);
+ 	unsigned long notify_action;
+ 	int ret;
+ 
+ 	ret = i2c_smbus_read_i2c_block_data(ddata->client, ASUSEC_READ_BUF,
+-					    ASUSEC_ENTRY_SIZE, ddata->ec_buf);
+-	if (ret < ASUSEC_ENTRY_SIZE)
++					    read_size, ddata->ec_buf);
++	if (ret < read_size)
+ 		return IRQ_NONE;
+ 
+ 	/* Check status byte with ASUSEC_OBF_MASK if data is valid */

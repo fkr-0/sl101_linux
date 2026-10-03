@@ -1,0 +1,49 @@
+Subject: Re: [PATCH v10 0/7] mfd: Add support for Asus Transformer embedded controller
+
+Hi Svyatoslav,
+
+I tested the v10-style ASUS Transformer EC stack on a physical ASUS Eee
+Pad Slider SL101 while bringing up its built-in sliding keyboard.
+
+The EC probes successfully as:
+
+  Model         : ASUS-EP102-DOCK
+  FW version    : SL101-0202
+  Config format : ECFG-0001
+  HW version    : PCBA-EP102
+
+and the KBC child creates an AT Raw Set 2 serio keyboard, but v10-style
+behavior does not complete atkbd initialization on the SL101.
+
+I found three details on the real hardware:
+
+1. The SL101 event window at 0x6a needs the 8-byte read used by ASUS's
+   downstream driver.  Using ASUSEC_ENTRY_SIZE (32) in the event/IRQ
+   path loses the keyboard command response path on this device.
+
+2. Keyboard command replies can be OBF-only, without KEY/KBC.  The
+   downstream driver accepts valid non-AUX OBF responses as keyboard
+   data, and doing the same is required for atkbd command ACKs.
+
+3. I observed the reset packet:
+
+     03 09 fa aa
+
+   where 03 counts the following status + payload bytes, 09 is status,
+   fa is the PS/2 ACK and aa is BAT success.  v9's data[0] - 1 payload
+   count was correct for this framing.  v10's data[0] - 2 drops the BAT
+   byte.  Keeping the v10 ASUSEC_ENTRY_SIZE upper bound while restoring
+   data[0] - 1 fixes the framing without reintroducing the earlier
+   out-of-buffer case.
+
+With those changes, plus the SL101 DT EC node at 0x19/0x1b, I rebuilt
+Linux 6.18.45 and tested it through RAM-only kexec while leaving the
+known-good /boot kernel/DTB untouched.  The physical sliding keyboard
+now works.
+
+I have small fixup diffs for patches 2/7 and 3/7 and can send them in
+whatever form is most useful for folding into the next revision.
+
+I can also provide a Tested-by tag using my real submission identity.
+
+Thanks for the work on this driver series.
