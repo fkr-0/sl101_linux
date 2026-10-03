@@ -1,0 +1,25 @@
+#!/bin/sh
+set -eu
+root=/opt/sl101-firefox-debian
+runtime=$root/run/user/1000
+CID=035344534c31323880ac79a543010300
+[ "$(cat /sys/block/mmcblk1/device/cid)" = "$CID" ]
+[ -S /run/sl101-desktop-user/wayland-0 ]
+[ -S /run/sl101-audio/pulse-browser ]
+for dev in null zero random urandom; do
+  mountpoint -q "$root/dev/$dev" || mount --bind "/dev/$dev" "$root/dev/$dev"
+done
+mountpoint -q "$root/proc" || mount -t proc proc "$root/proc"
+mountpoint -q "$root/dev/shm" || mount -t tmpfs -o size=64m,nosuid,nodev tmpfs "$root/dev/shm"
+mkdir -p "$runtime/pulse" "$root/home/browser/.local/share/chocolate-doom"
+chown -R 1000:1000 "$runtime" "$root/home/browser/.local"
+chmod 0700 "$runtime" "$runtime/pulse"
+if mountpoint -q "$runtime/wayland-0"; then umount "$runtime/wayland-0"; fi
+touch "$runtime/wayland-0"
+mount --bind /run/sl101-desktop-user/wayland-0 "$runtime/wayland-0"
+chown 10000:1000 /run/sl101-desktop-user/wayland-0
+chmod 0660 /run/sl101-desktop-user/wayland-0
+if mountpoint -q "$runtime/pulse/native"; then umount "$runtime/pulse/native"; fi
+touch "$runtime/pulse/native"
+mount --bind /run/sl101-audio/pulse-browser "$runtime/pulse/native"
+exec unshare --mount --fork /usr/local/libexec/sl101-doom-enter "$@"

@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+root=/opt/sl101-firefox-debian
+mount --make-rprivate /
+mount --rbind "$root" "$root"
+cd "$root"
+mkdir -p .sl101-host-root
+pivot_root . .sl101-host-root
+cd /
+umount -l /.sl101-host-root
+exec /usr/bin/setpriv --reuid=1000 --regid=1000 --init-groups \
+  /usr/bin/env -i HOME=/home/browser USER=browser LOGNAME=browser PATH=/usr/games:/usr/bin:/bin \
+  LANG=C.UTF-8 XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 \
+  PULSE_SERVER=unix:/run/user/1000/pulse/native \
+  SDL_VIDEODRIVER=wayland SDL_RENDER_DRIVER=software SDL_AUDIODRIVER=pulseaudio \
+  SDL_RENDER_SCALE_QUALITY=nearest \
+  /usr/games/chocolate-doom -iwad /usr/share/games/doom/doom1.wad \
+  -window -width 800 -height 600 -nograbmouse "$@"

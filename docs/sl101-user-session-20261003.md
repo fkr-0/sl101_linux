@@ -36,6 +36,8 @@ snapshots, not a general installation script. Their destinations are:
 | sl101-desktop | /usr/local/bin/sl101-desktop |
 | sl101-audio-session | /usr/local/bin/sl101-audio-session |
 | autostart | /home/user/.config/labwc/autostart |
+| sl101-doom-root | /usr/local/bin/sl101-doom-root |
+| sl101-doom-enter | /usr/local/libexec/sl101-doom-enter |
 
 Prerequisites include account `user` in `seat`, `audio`, `video` and host group
 `sl101-browser` (GID 1000), existing seatd/dbus services and the installed native
@@ -103,3 +105,11 @@ panel, WayVNC and all three audio processes started as `user`; WayVNC listened
 on 127.0.0.1:5900 and PipeWire selected the WM8903 playback sink at 44.1 kHz.
 This verifies an ordinary reboot, not a physical power-off/on cycle or human
 confirmation of display/input/audio.
+
+The post-reboot Firefox launcher started its application under Debian UID 1000.
+Native VLC's version command also succeeds under the host user. Doom's launcher
+now selects the already installed shareware `doom1.wad`, but Chocolate Doom
+still segfaults during sound precaching; a `-nosound` attempt also segfaulted.
+The launcher privilege transition is installed, but Doom runtime qualification
+is unresolved. Its preceding enter helper is preserved on the device at
+`/var/lib/sl101-doom-enter-before-user-review`.
