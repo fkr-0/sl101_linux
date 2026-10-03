@@ -23,6 +23,7 @@ CLOSURE_AUDIT = (
 )
 
 EXPECTED_WPE_VERSION = "2.54.0-2"
+EXPECTED_COG_VERSION = "0.18.5-1"
 EXPECTED_WPE_DEB = "libwpewebkit-2.0-1_2.54.0-2_armhf.deb"
 EXPECTED_WPE_SHA256 = "0b3713cae5520fb44a6fcb099b0b23b8f2802bf3e3a57415fc36b9616bc84ffb"
 SELECTED_PACKAGE_ALLOWED_FAILURES = {
@@ -92,9 +93,78 @@ def find_record(records: list[dict], suffix: str) -> dict | None:
     return next((r for r in records if r.get("path", "").endswith(suffix)), None)
 
 
+def is_elf(path: Path) -> bool:
+    try:
+        if not path.is_file():
+            return False
+        with path.open("rb") as fh:
+            return fh.read(4) == bytes((0x7F, 0x45, 0x4C, 0x46))
+    except OSError:
+        return False
+
+
+def compute_root_identity(root: Path) -> dict[str, object] | None:
+    status = root / "var/lib/dpkg/status"
+    if not root.is_dir() or not status.is_file():
+        return None
+    manifest = hashlib.sha256()
+    discovered = sorted(
+        str(path.relative_to(root))
+        for path in root.rglob("*")
+        if is_elf(path)
+    )
+    for rel in discovered:
+        digest = sha256(root / rel)
+        manifest.update(rel.encode("utf-8"))
+        manifest.update(bytes((0,)))
+        manifest.update(digest.encode("ascii"))
+        manifest.update(bytes((10,)))
+    return {
+        "dpkg_status_sha256": sha256(status),
+        "elf_manifest_sha256": manifest.hexdigest(),
+        "elf_count": len(discovered),
+    }
+
+
+def validate_closure_receipt(
+    payload: dict, closure_root: Path | None
+) -> tuple[bool, list[str], dict[str, object] | None]:
+    errors: list[str] = []
+    if payload.get("schema") != "sl101.wpe.runtime-closure-audit.v1":
+        errors.append("schema-mismatch")
+    if payload.get("pass") is not True:
+        errors.append("receipt-not-passing")
+
+    versions = payload.get("package_closure", {}).get("versions", {})
+    if versions.get("libwpewebkit-2.0-1") != EXPECTED_WPE_VERSION:
+        errors.append("wpe-version-mismatch")
+    if versions.get("cog") != EXPECTED_COG_VERSION:
+        errors.append("cog-version-mismatch")
+
+    actual_identity = None
+    if closure_root is None:
+        errors.append("closure-root-required")
+    else:
+        actual_identity = compute_root_identity(closure_root)
+        if actual_identity is None:
+            errors.append("closure-root-invalid")
+        else:
+            expected_identity = payload.get("root_identity", {})
+            for key in ("dpkg_status_sha256", "elf_manifest_sha256", "elf_count"):
+                if expected_identity.get(key) != actual_identity.get(key):
+                    errors.append(f"root-identity-mismatch:{key}")
+
+    return not errors, errors, actual_identity
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--json-output", default="-", help="output path or - for stdout")
+    ap.add_argument(
+        "--closure-root",
+        type=Path,
+        help="exact prepared root that the full-runtime closure receipt must match",
+    )
     args = ap.parse_args()
 
     required_files = (
@@ -172,16 +242,18 @@ def main() -> int:
 
     closure_ok = False
     closure_status = "unqualified"
+    closure_validation_errors: list[str] = []
+    closure_root_identity = None
     if CLOSURE_AUDIT.is_file():
         try:
             closure_payload = json.loads(CLOSURE_AUDIT.read_text(encoding="utf-8"))
-            closure_ok = (
-                closure_payload.get("schema") == "sl101.wpe.runtime-closure-audit.v1"
-                and closure_payload.get("pass") is True
+            closure_ok, closure_validation_errors, closure_root_identity = (
+                validate_closure_receipt(closure_payload, args.closure_root)
             )
             closure_status = "qualified" if closure_ok else "failed"
         except (OSError, json.JSONDecodeError):
             closure_status = "invalid-evidence"
+            closure_validation_errors = ["invalid-evidence"]
 
     passed = (
         package_ok
@@ -232,6 +304,9 @@ def main() -> int:
                 else None
             ),
             "required_tool": "scripts/sl101-wpe-runtime-closure-audit.py",
+            "bound_root": str(args.closure_root.resolve()) if args.closure_root else None,
+            "validation_errors": closure_validation_errors,
+            "actual_root_identity": closure_root_identity,
         },
         "grate_overlay_audit": {
             "elf_count": grate.get("elf_count"),

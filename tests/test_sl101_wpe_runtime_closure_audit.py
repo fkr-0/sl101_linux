@@ -5,11 +5,17 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/sl101-wpe-runtime-closure-audit.py"
+HOST_QUALIFIER = ROOT / "scripts/sl101-wpeplatform-host-qualify.py"
 
 spec = importlib.util.spec_from_file_location("closure_audit", SCRIPT)
 closure_audit = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
 spec.loader.exec_module(closure_audit)
+
+host_spec = importlib.util.spec_from_file_location("host_qualifier", HOST_QUALIFIER)
+host_qualifier = importlib.util.module_from_spec(host_spec)
+assert host_spec.loader is not None
+host_spec.loader.exec_module(host_qualifier)
 
 
 def status_text(include_webp=True):
@@ -84,6 +90,37 @@ class WPERuntimeClosureAuditTests(unittest.TestCase):
             )
             self.assertTrue(result["pass"], result)
             self.assertIn("libwebp7", result["package_closure"]["packages"])
+        finally:
+            td.cleanup()
+
+    def test_receipt_is_bound_to_expected_versions_and_exact_root(self):
+        td, root, packages = self.make_root()
+        try:
+            self.fake_elf(root / "usr/lib/libWPEWebKit.so")
+            webp = root / "usr/lib/libwebp.so.7"
+            self.fake_elf(webp)
+            raw = {
+                "records": [
+                    {"path": "usr/lib/libWPEWebKit.so", "issues": []},
+                    {"path": "usr/lib/libwebp.so.7", "issues": []},
+                ]
+            }
+            receipt = closure_audit.evaluate(
+                root, packages, raw, ["libwpewebkit-2.0-1", "cog"], set()
+            )
+            ok, errors, _ = host_qualifier.validate_closure_receipt(receipt, root)
+            self.assertTrue(ok, errors)
+
+            receipt["package_closure"]["versions"]["libwpewebkit-2.0-1"] = "2.54.0-1"
+            ok, errors, _ = host_qualifier.validate_closure_receipt(receipt, root)
+            self.assertFalse(ok)
+            self.assertIn("wpe-version-mismatch", errors)
+
+            receipt["package_closure"]["versions"]["libwpewebkit-2.0-1"] = "2.54.0-2"
+            webp.write_bytes(webp.read_bytes() + b"changed")
+            ok, errors, _ = host_qualifier.validate_closure_receipt(receipt, root)
+            self.assertFalse(ok)
+            self.assertIn("root-identity-mismatch:elf_manifest_sha256", errors)
         finally:
             td.cleanup()
 

@@ -39,7 +39,9 @@ Debian ARMHF browser root**, not a directory of selected package extracts. It:
    root;
 6. fails if any discovered ELF is missing from the audit;
 7. fails on every unexpected ISA violation;
-8. permits only exact-path failures explicitly supplied with
+8. records exact closure package versions plus SHA-256 identities for dpkg
+   status and the sorted ELF path/content manifest;
+9. permits only exact-path failures explicitly supplied with
    `--allow-failure`.
 
 There is deliberately no default allowlist. The historical
@@ -59,7 +61,15 @@ Against a fully prepared private root on the host:
 
 A successful result means the package dependency closure is present and every
 ELF object in that supplied root is represented in the ARMv7/VFPv3-D16/no-NEON
-audit with no unexpected failures.
+audit with no unexpected failures. The receipt is identity-bound to the exact
+dpkg status file and sorted ELF content manifest.
+
+The higher-level host qualifier must be given that same root:
+
+    python3 scripts/sl101-wpeplatform-host-qualify.py \\
+      --closure-root /path/to/private-root
+
+It rejects a passing receipt for the wrong WPE/Cog version or a different root.
 
 It still does not prove JIT-generated instructions or runtime IFUNC/HWCAP
 selection. Those remain live execution gates.

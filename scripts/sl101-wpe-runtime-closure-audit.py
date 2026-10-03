@@ -8,6 +8,7 @@ root. It performs no network or device access.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -115,6 +116,33 @@ def discover_elfs(root: Path) -> set[str]:
     return {str(path.relative_to(root)) for path in root.rglob("*") if is_elf(path)}
 
 
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def build_root_identity(root: Path) -> dict[str, object]:
+    status = root / "var/lib/dpkg/status"
+    if not status.is_file():
+        raise ValueError(f"missing dpkg status: {status}")
+    discovered = sorted(discover_elfs(root))
+    manifest = hashlib.sha256()
+    for rel in discovered:
+        digest = sha256_file(root / rel)
+        manifest.update(rel.encode("utf-8"))
+        manifest.update(bytes((0,)))
+        manifest.update(digest.encode("ascii"))
+        manifest.update(bytes((10,)))
+    return {
+        "dpkg_status_sha256": sha256_file(status),
+        "elf_manifest_sha256": manifest.hexdigest(),
+        "elf_count": len(discovered),
+    }
+
+
 def evaluate(
     root: Path,
     packages: dict[str, dict[str, str]],
@@ -161,16 +189,23 @@ def evaluate(
             unexpected,
         )
     )
+    package_versions = {
+        name: packages[name].get("Version")
+        for name in sorted(closure)
+    }
+    identity = build_root_identity(root)
 
     return {
         "schema": "sl101.wpe.runtime-closure-audit.v1",
         "root": str(root),
         "pass": passed,
         "root_packages": root_packages,
+        "root_identity": identity,
         "package_closure": {
             "installed_package_count": len(packages),
             "closure_package_count": len(closure),
             "packages": sorted(closure),
+            "versions": package_versions,
             "missing_root_packages": missing_roots,
             "missing_dependency_groups": missing_groups,
             "missing_dpkg_info_lists": package_info_lists_missing,

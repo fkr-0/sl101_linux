@@ -113,7 +113,9 @@ Therefore the 136-object result remains valid only for the objects it actually
 contains. It must not be used as proof that the complete browser root is
 Tegra20-safe. `scripts/sl101-wpeplatform-host-qualify.py` now fails closed
 until a complete prepared root passes
-`scripts/sl101-wpe-runtime-closure-audit.py`.
+`scripts/sl101-wpe-runtime-closure-audit.py` and the resulting receipt is
+revalidated against that same root with
+`scripts/sl101-wpeplatform-host-qualify.py --closure-root /path/to/root`.
 
 See `docs/sl101-wpe-runtime-closure-audit-20261004.md` for the corrected
 full-runtime contract.
