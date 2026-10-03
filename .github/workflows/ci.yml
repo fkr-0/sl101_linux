@@ -1,0 +1,17 @@
+name: CI
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Unit tests
+        run: make test
+      - name: Python syntax
+        run: make check
+      - name: Shell syntax
+        run: |
+          find scripts -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
+          bash -n scripts/sl101-user-session/*

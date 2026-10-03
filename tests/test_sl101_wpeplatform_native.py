@@ -11,6 +11,10 @@ DOC = ROOT / "docs/sl101-wpeplatform-native-20261003.md"
 
 
 class WPEPlatformNativeTests(unittest.TestCase):
+    @unittest.skipUnless(
+        (ROOT / "work/sl101-wpe-armhf-build-qualification-20261003/wpe-audit/package-control.txt").exists(),
+        "hardware/build qualification requires the separately archived WPE evidence bundle",
+    )
     def test_offline_host_qualification_passes_archived_evidence(self):
         result = subprocess.run(
             [sys.executable, str(QUALIFY)],
