@@ -98,13 +98,33 @@ package/source bundle is archived and hash-pinned. Until then, the upstream-buil
 MiniBrowser from the exact engine package is the smaller and more trustworthy
 native WPEPlatform harness.
 
+## 2026-10-04 runtime-closure correction
+
+The CPU audit described below was a **selected-package** audit, not a complete
+installed-runtime audit. The fetch script downloaded nine named WPE/Cog/GStreamer
+packages but did not resolve and extract their full Debian dependency closure.
+
+That distinction is material. Subsequent live debugging captured a page-load
+SIGILL in the `ImageDecoder` thread inside stock `libwebp.so.7`, at
+`vldr d16` followed by NEON `vst1.32`. WPE WebKit 2.54.0-2 declares
+`libwebp7` as a dependency, but libwebp was not present in the 136-object audit.
+
+Therefore the 136-object result remains valid only for the objects it actually
+contains. It must not be used as proof that the complete browser root is
+Tegra20-safe. `scripts/sl101-wpeplatform-host-qualify.py` now fails closed
+until a complete prepared root passes
+`scripts/sl101-wpe-runtime-closure-audit.py`.
+
+See `docs/sl101-wpe-runtime-closure-audit-20261004.md` for the corrected
+full-runtime contract.
+
 ## CPU / ARMHF qualification
 
 The raw stripped-object scan `wpe-audit/wpe-elf-audit.txt` produced many false
 positives because disassembly crossed stripped symbol/data boundaries. It must
 not be used as the final CPU verdict.
 
-The later debug-symbol-merged audit is authoritative for this package set:
+The later debug-symbol-merged audit is authoritative for this selected package set only:
 
     work/sl101-wpe-armhf-build-qualification-20261003/
       wpe-debug-audit/merged-elf-audit.json
@@ -132,8 +152,7 @@ The private Grate overlay remains separately green:
     -march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=hard
     LLVM disabled; Gallium grate,softpipe
 
-The static result cannot prove that JSC-generated code on Tegra20 is safe. The
-first device lane must retain a CPU/JIT execution gate.
+This selected-package static result cannot prove the complete transitive runtime or JSC-generated code on Tegra20 is safe. A full-root closure audit plus the live CPU/JIT execution gate are both required.
 
 ## Reproducible armhf packaging plan
 
