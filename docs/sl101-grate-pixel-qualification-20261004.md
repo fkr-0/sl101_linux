@@ -56,3 +56,44 @@ must not ship: honoring the application's requested filter remains required.
 
 The 405-pixel compositor-semantics residual is tracked separately because it has
 a materially different topology and includes bounded-damage / edge cases.
+
+## Nearest-filter hardware diagnostic
+
+Using `on_tab.sh`, an otherwise identical diagnostic was built from the accepted
+`68a78e18...` blend archive with only `grate_state.c.o` replaced. The replacement
+forces the sampler descriptor's minification and magnification filter bits to
+nearest while leaving texture format, wrap mode, shader compiler, blend path and
+resource code unchanged.
+
+Diagnostic libgallium SHA256:
+`ea6a88ddc99f0d5f173d37969a572816fb6432e12124b41005906a237cc630c8`.
+It was staged only under the new prefix
+`/opt/grate-mesa25-nearestdiag-ea6a88ddc99f0d5f173d37969a572816fb6432e12124b41005906a237cc630c8`.
+
+Results on the live SL101:
+
+| Gate | Accepted linear candidate | Nearest diagnostic |
+| --- | ---: | ---: |
+| Strict 1280x720 ramp, tolerance 2 | 135476 wrong | **0 wrong** |
+| Mixed compositor semantics | 405 wrong | **0 wrong** |
+| Strict ramp maximum channel error | 34 | **0** |
+| Mixed semantics maximum channel error | 134 | **2** |
+| Kernel GPU faults/resets | 0 | **0** |
+| Visible desktop survives | yes | **yes** |
+
+The strict-ramp Grate capture is byte-identical to the pixman capture
+(`3e93f500d8b3d1870735bfe9d2021ed9f991242efd379676679f978a5404da8f`).
+This makes texture memory layout, pitch, channel order, blend correctness and
+synchronization poor explanations for the previous 135476-pixel residual.
+
+### Interpretation
+
+The remaining defect is localized to texture-coordinate phase/interpolation as
+observed by linear filtering. Nearest filtering is a diagnostic/workaround, not
+a general final fix: scaled or transformed surfaces still require the requested
+linear semantics. The next driver pass should preserve linear filtering and
+correct the coordinate phase/precision path; nearest may only be considered as
+a conditional 1:1 optimization if exact no-scale detection is proven.
+
+Archived device summaries live under
+`work/sl101-grate-ramp-20261004/device-evidence/`.
