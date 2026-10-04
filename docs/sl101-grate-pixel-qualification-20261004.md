@@ -198,3 +198,59 @@ Archived evidence:
 
 - `work/sl101-grate-ramp-20261004/device-evidence/affinephase-strict-summary.json`
 - `work/sl101-grate-ramp-20261004/device-evidence/mfubypass-strict-result.txt`
+
+
+### Coordinate-stage separation: sampler vs interpolation
+
+A dedicated ARMv7/GBM probe now separates fragment-varying interpolation from
+texture sampling instead of inferring the source from the compositor ramp.
+
+The accepted driver initially rejected a fragment shader that sampled directly
+from a uniform texture coordinate (`texture coordinates must come from a
+varying input`), so the sampler-only path uses a constant vertex attribute:
+all vertices carry the same UV and therefore introduce no coordinate gradient.
+
+A first 2x2 texture exposed format/pitch confounders. The clean discriminator
+therefore uses a 4x4 grayscale RGBA texture: each row is exactly 16 bytes and
+all color channels are equal, eliminating channel-order ambiguity. With the
+accepted driver, row 0 sampled correctly and horizontal `GL_LINEAR` halfway
+sampling was exact, but every access requiring a later texture row returned
+zero. Nearest centers failed on the same later rows. This identified a separate
+sampler-only resource-layout bug rather than a linear-filter bug.
+
+The accepted resource allocator aligned sampler-only rows to 64 bytes even
+though the Tegra20 texture descriptor carries no pitch. A diagnostic candidate
+keeps sampler-only rows tight (`width * blocksize`) and changes only the
+sampler-view validation to match. Candidate SHA256:
+
+`f723ee69ef86717c1b21820aaa4ac051481bac5a0ce8aafd26b906281b440673`
+
+With that diagnostic candidate:
+
+- constant-coordinate `GL_LINEAR`: **9/9 PASS**, including texel centers and
+  horizontal/vertical/four-way halfway samples;
+- nearest centers: **4/4 PASS**;
+- texture-free perspective interpolation: **48/48 sampled points PASS** with
+  maximum error **1/255** across both triangle diagonals, 64x64 and 47x31
+  viewports, and nonuniform clip-space W sets
+  `(0.65,1.35,0.85,1.70)` and `(1.8,0.7,1.4,0.6)`;
+- no new kernel GPU fault/reset/timeout and the visible desktop survived.
+
+The same tight-pitch candidate leaves the strict compositor ramp **exactly
+unchanged** at **135,476 / 921,600 wrong pixels**, maximum channel error 34.
+That proves the raw sampler-only pitch defect is real but orthogonal to the
+remaining compositor mismatch.
+
+The current boundary is therefore narrower than either "linear sampling" or
+"perspective interpolation" in isolation: both isolated stages pass. The next
+target is the **combined interpolated-varying -> TEX handoff**, especially fused
+MFU/TEX scheduling, perspective-correct coordinate row preservation, and which
+register/row values TEX consumes in the same EXEC. Viewport offset tuning is
+closed and should not be resumed.
+
+Evidence:
+
+- `work/sl101-grate-ramp-20261004/coordinate-stage-discriminator.c`
+- `work/sl101-grate-ramp-20261004/device-evidence/accepted-coordinate-stage-discriminator.txt`
+- `work/sl101-grate-ramp-20261004/device-evidence/tightpitch-coordinate-stage-discriminator.txt`
+- `work/sl101-grate-ramp-20261004/device-evidence/tightpitch-strict-summary.json`
