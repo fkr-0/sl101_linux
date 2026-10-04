@@ -257,3 +257,25 @@
      struct fp_mfu_instr *first = list_first_entry(&fp->mfu_instructions, struct fp_mfu_instr, link);
      first->sfu.op = FP_SFU_OP_RCP;
      first->sfu.reg = 4;
+--- a/gallium/drivers/grate/grate_resource.c
++++ b/gallium/drivers/grate/grate_resource.c
+@@ -217,0 +218,7 @@
++      /*
++       * Tegra20's linear texture descriptor carries no explicit row pitch.
++       * Hardware derives the row stride from width with 16-byte alignment;
++       * the historical 64-byte alignment over-pads small textures and makes
++       * rows after the first sample from the wrong address.
++       */
++      resource->pitch = align(resource->pitch, 16);
+--- a/gallium/drivers/grate/grate_texture.h
++++ b/gallium/drivers/grate/grate_texture.h
+@@ -102,3 +102,3 @@
+- * Tegra20's texture descriptor has no linear pitch field. Until a tiled
+- * sampling layout is implemented, a linear sampled image must be tightly
+- * packed.
++ * Tegra20's texture descriptor has no linear pitch field. Linear sampled
++ * images therefore have to follow the hardware's implicit 16-byte row
++ * alignment.
+@@ -113 +113 @@
+-   return pitch == width * blocksize;
++   return pitch == align(width * blocksize, 16);
