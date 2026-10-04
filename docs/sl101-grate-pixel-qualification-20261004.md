@@ -332,3 +332,45 @@ Qualification evidence:
 - `work/sl101-grate-ramp-20261004/device-evidence/wlroots1to1-semantics-local-compare.json`
 - `work/sl101-grate-ramp-20261004/device-evidence/wlroots1to1-semantics-regions.json`
 - `work/sl101-grate-ramp-20261004/test_exact_1to1_guard.py`
+
+### Sampler row-pitch production fix
+
+The earlier sampler-only tight-row diagnostic correctly proved that the historical
+64-byte row alignment was wrong for small textures, but a production regression
+test showed that fully tight rows are also too strict for compositor-sized
+textures. The hardware contract is **16-byte implicit row alignment**.
+
+Evidence across resource sizes:
+
+- 2x2 RGBA: 8 row bytes -> 16-byte pitch; historical Stage-C texture probe PASS.
+- 4x4 RGBA: 16 row bytes -> 16-byte pitch; GL_LINEAR 9/9 multi-row samples PASS
+  and GL_NEAREST lower-row center samples PASS.
+- 173-pixel XRGB compositor texture: 692 row bytes -> 704-byte pitch.
+- 191-pixel ARGB compositor texture: 764 row bytes -> 768-byte pitch.
+
+The production driver change therefore aligns sampler-only allocations to 16
+bytes and accepts a linear sampler view only when `pitch == align(width *
+blocksize, 16)`. Render-target, scanout and depth/stencil allocation branches
+are unchanged, as is imported-handle pitch preservation.
+
+Qualified ARMv7 driver SHA256:
+
+`fc4f0347fcd3761052255ac1cd610dfecee20187329e9d799358569d14778679`
+
+Hardware regression results with the independently approved exact-1:1 wlroots
+filter optimization still present:
+
+- strict ramp: **0 / 921,600 wrong**, maximum channel error 0;
+- mixed compositor semantics: **0 / 921,600 wrong at tolerance 3**, maximum
+  channel error 2, frame SHA256
+  `6e62d628d4983cf9f01f89fa6f7ca30839cf99abd075f010498780932986af6a`;
+- no new GPU fault/reset evidence in the pitch-specific probe path;
+- visible desktop survived all completed hardware gates.
+
+A deliberately fully-tight diagnostic was rejected because it caused 33,966
+mixed-semantics pixels outside tolerance (maximum error 254). This negative
+control is what distinguishes the actual 16-byte contract from mere tight
+packing.
+
+Evidence lives under
+`work/sl101-grate-ramp-20261004/pitch-fix/evidence16/`.
