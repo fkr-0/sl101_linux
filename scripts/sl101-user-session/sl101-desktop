@@ -18,7 +18,7 @@ chmod 700 "$XDG_RUNTIME_DIR"
 
 unset LD_LIBRARY_PATH GBM_BACKENDS_PATH LIBGL_DRIVERS_PATH MESA_LOADER_DRIVER_OVERRIDE
 WLR_RENDERER=pixman
-GRATE_PREFIX=/usr/local/lib/sl101-grate-32784d505bc5df524d373ef1ab8572c73640099f1b98cdbdd716eaea07289b88
+GRATE_PREFIX=/usr/local/lib/sl101-grate-38b7bd1f600d2889a3caeec609e7520842701eab8aa10193f98966ce4e33987c
 case "$SL101_DESKTOP_RENDERER" in
   grate)
     if [ "$(uname -r)" = 7.0.1-postmarketos-grate ] &&

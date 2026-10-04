@@ -1,0 +1,47 @@
+diff --git a/render/gles2/pass.c b/render/gles2/pass.c
+index a70ea13..8fe5457 100644
+--- a/render/gles2/pass.c
++++ b/render/gles2/pass.c
+@@ -1,5 +1,6 @@
+ #include <stdlib.h>
+ #include <assert.h>
++#include <math.h>
+ #include <pixman.h>
+ #include <time.h>
+ #include <unistd.h>
+@@ -196,6 +197,24 @@ static void render_pass_add_texture(struct wlr_render_pass *wlr_pass,
+ 	wlr_render_texture_options_get_dst_box(options, &dst_box);
+ 	float alpha = wlr_render_texture_options_get_alpha(options);
+ 
++	/*
++	 * For an integer-aligned, untransformed 1:1 blit, ideal bilinear
++	 * sampling lands exactly on texel centers and is therefore identical to
++	 * nearest sampling. Prefer nearest for this exact case so finite varying
++	 * interpolation precision cannot introduce neighboring-texel blends.
++	 *
++	 * Keep this deliberately strict: fractional crops, scaling, transforms
++	 * and external textures retain the caller-requested filter unchanged.
++	 */
++	bool exact_1to1 =
++		options->filter_mode == WLR_SCALE_FILTER_BILINEAR &&
++		texture->target == GL_TEXTURE_2D &&
++		options->transform == WL_OUTPUT_TRANSFORM_NORMAL &&
++		src_fbox.x == floorf(src_fbox.x) &&
++		src_fbox.y == floorf(src_fbox.y) &&
++		src_fbox.width == (float)dst_box.width &&
++		src_fbox.height == (float)dst_box.height;
++
+ 	src_fbox.x /= options->texture->width;
+ 	src_fbox.y /= options->texture->height;
+ 	src_fbox.width /= options->texture->width;
+@@ -231,7 +250,9 @@ static void render_pass_add_texture(struct wlr_render_pass *wlr_pass,
+ 	glActiveTexture(GL_TEXTURE0);
+ 	glBindTexture(texture->target, texture->tex);
+ 
+-	switch (options->filter_mode) {
++	enum wlr_scale_filter_mode filter_mode = exact_1to1 ?
++		WLR_SCALE_FILTER_NEAREST : options->filter_mode;
++	switch (filter_mode) {
+ 	case WLR_SCALE_FILTER_BILINEAR:
+ 		glTexParameteri(texture->target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+ 		glTexParameteri(texture->target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);

@@ -8,12 +8,13 @@ import subprocess
 import sys
 import time
 
-PREFIX = Path('/usr/local/lib/sl101-grate-32784d505bc5df524d373ef1ab8572c73640099f1b98cdbdd716eaea07289b88')
+PREFIX = Path('/usr/local/lib/sl101-grate-38b7bd1f600d2889a3caeec609e7520842701eab8aa10193f98966ce4e33987c')
 HASHES = {
+ 'lib/libwlroots-0.20.so': '0b8c8eb2f1740e8ce258c3d627239a957963e0641cbe6776143afaf14ee56034',
  'lib/libgbm.so.1.0.0': '1c4042212d694238eaa81f924735b716dc58b2289b2deb4ff4d293c56e968415',
  'lib/libdrm_tegra.so.0.0.0': '6755a68138398759982b8ecae68c67e38c9ac518108d4c7b451642fa89656f75',
  'lib/libGLESv2.so.2.0.0': '3d85e5bb8b58270c1a77927e855ba7e76fd376014f24f50af99a2539749d87c6',
- 'lib/libgallium-25.0.7.so': '32784d505bc5df524d373ef1ab8572c73640099f1b98cdbdd716eaea07289b88',
+ 'lib/libgallium-25.0.7.so': '38b7bd1f600d2889a3caeec609e7520842701eab8aa10193f98966ce4e33987c',
  'lib/gbm/dri_gbm.so': '5536db796752fc07654ec4fe74e5ba1acee54c83aa0937427f5a9916303afce3',
  'lib/libEGL.so.1.0.0': '0f33c2c5bce42c719dcea633edef5c6d4dfac994cd1f6ad0d812a02d4fb13148',
 }
