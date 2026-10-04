@@ -254,3 +254,81 @@ Evidence:
 - `work/sl101-grate-ramp-20261004/device-evidence/accepted-coordinate-stage-discriminator.txt`
 - `work/sl101-grate-ramp-20261004/device-evidence/tightpitch-coordinate-stage-discriminator.txt`
 - `work/sl101-grate-ramp-20261004/device-evidence/tightpitch-strict-summary.json`
+
+
+### Final discriminator: Tegra20 bilinear weight precision
+
+The combined-path investigation was extended to full-frame tests. Sparse
+varying-to-TEX samples can pass while a 1280x720 1:1 ramp exposes the residual:
+with `GL_LINEAR`, the direct path produced 19,612 wrong pixels and the
+post-texture ALU path 19,629, while the otherwise identical `GL_NEAREST` path
+was byte-exact. Texture-free varying interpolation remained correct even when
+amplified by 64x, 128x, 256x, 512x and 1024x across the full 1280x720 frame;
+each run had zero pixels beyond tolerance and maximum channel error 1/255.
+This removes ordinary MFU barycentric precision as the cause.
+
+A constant-coordinate sampler sweep then measured the linear filter directly.
+For a black-to-white texel transition, 257 requested fractional positions
+(`k/256`, `k=0..256`) produced exactly **65 distinct sample values**. Positions
+land on 0/64 through 64/64 filter weights: for example 3/256 snaps to 0/64,
+4/256 is exactly 1/64, 7/256 snaps to 1/64, and 8/256 is exactly 2/64. Maximum
+error against ideal 8-bit linear interpolation is 3. This is direct hardware
+evidence that Tegra20's bilinear filter uses **6-bit fractional weights**.
+
+That explains both the original neighbor-blend classifier and why global
+nearest eliminated the residual. It also changes the appropriate fix: do not
+alter viewport phase, MFU perspective interpolation, or global sampler
+semantics. For a true integer-aligned, untransformed 1:1 blit, ideal bilinear
+sampling lands exactly on texel centers and is mathematically identical to
+nearest. Selecting nearest only for that exact case avoids Tegra20's finite
+bilinear-weight quantization without changing the ideal rendered result.
+
+The wlroots GLES2 candidate therefore selects nearest only when all of these are
+true:
+
+- caller requested `WLR_SCALE_FILTER_BILINEAR`;
+- texture target is `GL_TEXTURE_2D` (not external);
+- texture transform is `WL_OUTPUT_TRANSFORM_NORMAL`;
+- source crop X/Y are integer aligned;
+- source width and height exactly equal destination width and height.
+
+Fractional crop, scaling in either direction, rotation/flip, external textures,
+and explicit nearest remain on their original caller-selected path. The task
+local guard matrix covers 12 positive/negative cases and passes all 12.
+
+An ARMv7/musl wlroots build containing only this GLES2 source change was tested
+with the accepted Grate driver SHA256
+`68a78e18af642275d3fec6fc93a4f20cd618d9f951981c7e240d5731e7f29ade`.
+Because the preserved cross sysroot lacks development packages for optional
+DRM/libinput/Xwayland/session features, the headless qualification library uses
+test-only zero stubs for those unused optional symbols so stock `labwc` can
+load it. Those stubs are **not** part of the production patch.
+
+Strict ramp hardware result with the accepted driver unchanged:
+
+- wrong pixels: **0 / 921,600**;
+- maximum channel error: **0**;
+- frame SHA256:
+  `3e93f500d8b3d1870735bfe9d2021ed9f991242efd379676679f978a5404da8f`;
+- no new kernel GPU faults/resets;
+- visible desktop survived.
+
+The mixed compositor-semantics capture also has **0 pixels outside tolerance
+3**, maximum channel error 2. The remote Python comparator was terminated after
+capture while slowly iterating pixels, so the saved hardware frame and oracle
+were compared locally with the same qualification comparator. All regions
+(background, parent damage, XRGB, XRGB patch, ARGB and overlap) have **0 wrong
+pixels**; XRGB/ARGB/overlap reach maximum channel error 2.
+
+Production patch artifact:
+
+- `work/sl101-grate-ramp-20261004/0001-gles2-use-nearest-for-exact-1to1.patch`
+
+Qualification evidence:
+
+- `work/sl101-grate-ramp-20261004/device-evidence/filter-precision.out`
+- `work/sl101-grate-ramp-20261004/device-evidence/amplified-interp.out`
+- `work/sl101-grate-ramp-20261004/device-evidence/wlroots1to1-strict-summary.json`
+- `work/sl101-grate-ramp-20261004/device-evidence/wlroots1to1-semantics-local-compare.json`
+- `work/sl101-grate-ramp-20261004/device-evidence/wlroots1to1-semantics-regions.json`
+- `work/sl101-grate-ramp-20261004/test_exact_1to1_guard.py`
