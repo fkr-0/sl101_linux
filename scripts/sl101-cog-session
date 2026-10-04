@@ -1,0 +1,36 @@
+#!/bin/sh
+set -eu
+mode=$1
+render_gid=$2
+shift 2
+root=/opt/sl101-cog-wpe-debian
+mount --make-rprivate /
+mount --rbind "$root" "$root"
+cd "$root"
+mkdir -p .sl101-host-root
+pivot_root . .sl101-host-root
+cd /
+umount -l /.sl101-host-root
+if [ "$mode" = gpu ]; then
+    lib=/opt/grate-glibc-45ef1175/usr/lib/arm-linux-gnueabihf
+    test -f /opt/grate-glibc-45ef1175/.sl101-overlay-sha256
+    test -d "$lib"
+    exec /usr/bin/setpriv --reuid=1000 --regid=1000 --groups "$render_gid" \
+      /usr/bin/env -i HOME=/home/browser USER=browser LOGNAME=browser PATH=/usr/bin:/bin \
+      LANG=C.UTF-8 XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 \
+      WEBKIT_USE_SKIA_FOR_COMPOSITION="${SL101_WPE_SKIA_COMPOSITION:-0}" \
+      LD_LIBRARY_PATH="/opt/sl101-webp-nosimd/lib:$lib:$lib/dri:$lib/gbm" LIBGL_DRIVERS_PATH="$lib/dri" \
+      GBM_BACKENDS_PATH="$lib/gbm" MESA_LOADER_DRIVER_OVERRIDE=grate \
+      /usr/bin/dbus-run-session -- /usr/bin/cog --platform=wl "$@"
+fi
+# Debian armhf libwebp 1.6.0-0.1 executes NEON/VFP d16+ code on Tegra20
+# despite the CPU exposing only VFPv3-D16 and no NEON. The software-first
+# browser uses the existing no-SIMD build from this private prefix. Both modes
+# retain that decoder override; the system package is unchanged.
+exec /usr/bin/setpriv --reuid=1000 --regid=1000 --groups "$render_gid" \
+  /usr/bin/env -i HOME=/home/browser USER=browser LOGNAME=browser PATH=/usr/bin:/bin \
+  LANG=C.UTF-8 XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 \
+  WEBKIT_USE_SKIA_FOR_COMPOSITION="${SL101_WPE_SKIA_COMPOSITION:-0}" \
+  LD_LIBRARY_PATH=/opt/sl101-webp-nosimd/lib \
+  LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=softpipe MESA_LOADER_DRIVER_OVERRIDE=swrast \
+  /usr/bin/dbus-run-session -- /usr/bin/cog --platform=wl "$@"
