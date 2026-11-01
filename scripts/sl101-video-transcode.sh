@@ -3,21 +3,23 @@
 set -eu
 usage() {
     cat <<'EOF'
-usage: sl101-video-transcode.sh [--height 360|480] [--codec mpeg4|h264] -- INPUT OUTPUT.mp4
+usage: sl101-video-transcode.sh [--height 360|480] [--codec mpeg4|h264] [--profile baseline|main] -- INPUT OUTPUT.mp4
 
-Creates a low-complexity 24fps 8-bit 4:2:0 MP4 for software playback on
-the non-NEON Tegra20. MPEG-4 Part 2 is the default CPU-friendly choice.
-H.264 Baseline/CAVLC is an optional VDE research fixture, NOT proof of
-hardware decoding. Refuses to replace existing files.
+Creates a low-complexity 24fps 8-bit 4:2:0 MP4 for playback on the
+non-NEON Tegra20. MPEG-4 Part 2 is the default CPU-friendly choice.
+H.264 with --profile main produces VDE hardware-decode-compatible output
+(Baseline/CAVLC is the default H.264 profile). Refuses to replace existing files.
 EOF
 }
 die() { printf 'sl101-video-transcode: %s\n' "$*" >&2; exit 1; }
 height=360
 codec=mpeg4
+profile=baseline
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --height) [ "$#" -ge 2 ] || die '--height needs a value'; height=$2; shift 2 ;;
         --codec) [ "$#" -ge 2 ] || die '--codec needs a value'; codec=$2; shift 2 ;;
+        --profile) [ "$#" -ge 2 ] || die '--profile needs a value'; profile=$2; shift 2 ;;
         --) shift; break ;;
         -h|--help) usage; exit 0 ;;
         *) usage >&2; die "unknown option: $1" ;;
@@ -26,6 +28,7 @@ done
 [ "$#" -eq 2 ] || { usage >&2; die 'input and output required'; }
 case "$height" in 360|480) ;; *) die 'height must be 360 or 480';; esac
 case "$codec" in mpeg4|h264) ;; *) die 'codec must be mpeg4 or h264';; esac
+case "$profile" in baseline|main) ;; *) die 'profile must be baseline or main';; esac
 input=$1
 output=$2
 [ -r "$input" ] && [ -f "$input" ] || die "unreadable input: $input"
@@ -44,11 +47,19 @@ command -v ffmpeg >/dev/null 2>&1 || die 'ffmpeg is required on the host'
 # min(ih,N) preserves small sources without upscaling.
 filter="scale=w=-2:h='min(ih,$height)':flags=fast_bilinear,fps=24,format=yuv420p"
 if [ "$codec" = h264 ]; then
-    exec ffmpeg -hide_banner -nostdin -n -i "$input" \
-        -map 0:v:0 -map '0:a:0?' -sn -dn -vf "$filter" \
-        -c:v libx264 -preset ultrafast -profile:v baseline -level:v 3.0 \
-        -x264-params cabac=0:ref=1:bframes=0 -crf 25 -maxrate 1000k -bufsize 2000k \
-        -c:a aac -b:a 96k -ac 2 -movflags +faststart "$output"
+    if [ "$profile" = main ]; then
+        exec ffmpeg -hide_banner -nostdin -n -i "$input" \
+            -map 0:v:0 -map '0:a:0?' -sn -dn -vf "$filter" \
+            -c:v libx264 -preset ultrafast -profile:v main -level:v 3.1 \
+            -crf 23 -maxrate 2000k -bufsize 4000k \
+            -c:a aac -b:a 96k -ac 2 -movflags +faststart "$output"
+    else
+        exec ffmpeg -hide_banner -nostdin -n -i "$input" \
+            -map 0:v:0 -map '0:a:0?' -sn -dn -vf "$filter" \
+            -c:v libx264 -preset ultrafast -profile:v baseline -level:v 3.0 \
+            -x264-params cabac=0:ref=1:bframes=0 -crf 25 -maxrate 1000k -bufsize 2000k \
+            -c:a aac -b:a 96k -ac 2 -movflags +faststart "$output"
+    fi
 fi
 exec ffmpeg -hide_banner -nostdin -n -i "$input" \
     -map 0:v:0 -map '0:a:0?' -sn -dn -vf "$filter" \

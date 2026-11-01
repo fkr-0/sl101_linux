@@ -1,4 +1,4 @@
-# SL101 local video-file playback — software-first v1 (2026-11-01)
+# SL101 local video-file playback — VDE hardware decode qualified (2026-11-01)
 
 ## Verdict and ownership
 
@@ -10,21 +10,27 @@ recovery compositor remains Pixman; this lane does not replace it.
 
 Video *display* and video *decode* are distinct:
 
-- v1 uses **mpv with software decoding** (`--hwdec=no`) and **Wayland
-  shared memory** (`--vo=wlshm`). It does not depend on Grate.
-- Tegra20 has a separate VDE video-decoder block. Linux may expose this through
-  `CONFIG_VIDEO_TEGRA_VDE` and V4L2-request/stateless codec APIs. The
-  **host-side** 7.0.1 Grate build tree
-  `work/sl101-ec-v12-20261020/grate-build/.config` explicitly has
-  `CONFIG_VIDEO_TEGRA_VDE=m`, and its
-  `drivers/media/platform/nvidia/tegra-vde/tegra-vde.ko` was built.
-  This is encouraging kernel-side evidence, **not** proof that the running
-  SL101 loaded the same module, has a decoder node or supports playback.
-  The installed kernel configuration, device node, userspace decoder, and
-  correct decoded frames remain **unqualified**.
+- **Software path** uses mpv with software decoding (`--hwdec=no`) and Wayland
+  shared memory (`--vo=wlshm`). Any codec mpv supports works, but frame drops
+  are heavy even at 360p (~50% on dual-core ARMv7 without NEON).
+- **VDE hardware decode** uses the Tegra20 Video Decoder Engine via the
+  GStreamer V4L2 stateless codec pipeline (`v4l2slh264dec` from `gst-plugins-bad`).
+  The `tegra_vde` kernel module is loaded, `/dev/video0` is registered, and
+  the decoder accepts `S264` (H.264 Parsed Slice Data) input with `YM12`/`YM21`
+  output (Tegra non-contiguous tiled YUV420). **Only H.264 Baseline,
+  Constrained Baseline and Main profiles** are supported by the hardware;
+  High profile content requires transcoding first.
+  **KMS direct display** (`--kms`, default): `v4l2slh264dec` → `kmssink` with
+  `alsasink`. VDE DMABuf goes directly to the DRM plane — zero-copy, native
+  24fps, correct pixels. Stops the Wayland compositor during playback and
+  restarts it afterwards. **Wayland fallback** (`--wayland`): uses
+  `waylandsink` with system-memory I420 frames and a 12fps videorate cap;
+  produces distorted pixels due to buggy YM12→I420 conversion in the V4L2
+  plugin — use only when KMS is not available.
+  FFmpeg's `h264_v4l2m2m` wrapper does NOT work — it targets stateful V4L2
+  decoders, not the stateless/request-API Tegra VDE.
 - Historical `libvdpau-tegra` uses an X11/VDPAU output path; it is not a
-  drop-in replacement for the Wayland/Pixman or WPE video pipeline. Its old
-  H.264 accelerator limitations must not be confused with general MP4 support.
+  drop-in replacement for the Wayland/Pixman or WPE video pipeline.
 
 ASUS SL101 Tegra20 is ARMv7-A, VFPv3-D16, **no NEON**. High-profile H.264,
 high resolutions, and HEVC may overload its dual-core CPU. Start with a
@@ -32,26 +38,36 @@ low-complexity 360p MPEG-4 Part 2 + AAC MP4 compatibility file.
 
 ## Files and execution
 
-- `scripts/sl101-video-play.sh`: actual local video-file player with mpv,
+- `scripts/sl101-video-play.sh`: mpv software-decode player with wlshm output,
   fail-closed file and Wayland socket checks, optional fullscreen/mute.
+- `scripts/sl101-video-play-vde.sh`: GStreamer VDE hardware-decode player using
+  `v4l2slh264dec` + `videorate` + `waylandsink`. H.264 Baseline/Main only.
+  Default 12fps display cap (tunable with `--fps N`) to match the Pixman
+  compositor's I420→RGBx software conversion throughput.
 - `scripts/sl101-video-deploy.sh`: review-only-by-default, SHA-256 checked
   launcher deployment gated on pinned SSH identity, SD CID, kernel, root UUID,
-  and existing SL101 qualification lock. It does **not** install mpv.
+  and existing SL101 qualification lock.
 - `scripts/sl101-video-transcode.sh`: creates low-complexity MP4 copy using a
-  **host** with FFmpeg; refuses overwrite.
+  **host** with FFmpeg; `--profile main` for VDE-compatible H.264. Refuses overwrite.
 - `scripts/sl101-video-probe.py`: read-only JSON report of kernel identity,
-  package/output prerequisites and VDE *possibility*. It never labels VDE
-  working merely because a node or config is present.
+  software/hardware prerequisites and VDE device status. Reports VDE as `ready`
+  only when the full chain (module, device, driver, V4L2 formats, GStreamer
+  decoder) is present.
 - `tests/test_sl101_video.py`: device-independent tests (including filenames
-  with spaces and safe mpv argument handling).
+  with spaces, safe argument handling, VDE qualification logic).
 
 On a machine with FFmpeg installed, prepare a file:
 
     sh scripts/sl101-video-transcode.sh --height 360 --codec mpeg4 -- \
       "./original movie.mkv" "./sl101-ready.mp4"
 
-Or for an **experimental H.264 Baseline/CAVLC** test, NOT a proven hardware
-path:
+For **VDE hardware decode**, transcode to Main profile H.264 (the VDE cannot
+decode High profile content such as typical x264 BluRay rips):
+
+    sh scripts/sl101-video-transcode.sh --height 360 --codec h264 --profile main -- \
+      "./original movie.mkv" "./sl101-vde-main.mp4"
+
+For Baseline/CAVLC (simpler, also VDE-compatible):
 
     sh scripts/sl101-video-transcode.sh --height 360 --codec h264 -- \
       "./original movie.mkv" "./sl101-h264-baseline.mp4"
@@ -122,13 +138,62 @@ selection intact.
 6. Preserve `WLR_RENDERER=pixman` recovery path. No unattended suspend,
    reboot, renderer promotion, firmware flash or default-player change.
 
-## Status, 2026-11-01
+## Status, 2026-11-02
 
-Repository implementation and host-only automated tests can be completed without
-device access; **no on-device playback is claimed** until steps 1–4 have actual
-receipts. Last read-only SSH attempt to the pinned SL101 address
-`192.168.23.106` failed with `No route to host`. Device package inventory,
-codec throughput, display and audio are therefore unknown.
+Device at `192.168.23.106` is live. Identity confirmed: SD CID
+`035344534c31323880ac79a543010300`, kernel `7.0.1-postmarketos-grate`,
+root UUID `6dd3675d-b5cf-41bd-9262-103c59321451`, labwc with
+`WLR_RENDERER=pixman`, Wayland socket at `/run/sl101-desktop-user/wayland-0`.
+
+**Installed packages** (device-side): mpv 0.41.0, v4l-utils 1.32.0,
+ffmpeg 9.0.2, gstreamer 1.28.5, gst-plugins-bad 1.28.7 (includes
+`v4l2codecs` with `v4l2slh264dec`), gst-plugins-good 1.28.7,
+gst-libav 1.28.8.
+
+**VDE hardware decode + KMS display qualified:**
+- `tegra_vde` module loaded, `/dev/video0` registered as
+  `tegra-vde` V4L2 stateless M2M decoder.
+- Input: `S264` (H.264 Parsed Slice Data). Output: `YM12`/`YM21`
+  (Tegra non-contiguous tiled YUV420 planar).
+- Profiles: Baseline, Constrained Baseline, Main. Levels 1–5.1.
+  **High profile is NOT supported** (the two on-device files are High profile).
+- **KMS direct display (primary path):** `v4l2slh264dec` → `kmssink` with
+  `alsasink`. VDE DMABuf goes directly to the DRM plane — zero-copy, no
+  software colorspace conversion. Plays at native 24fps with correct pixels,
+  crisp audio, and confirmed A/V sync over 3-minute test. The script stops the
+  Wayland compositor for DRM master access and restarts it after playback.
+  VT text is blanked during playback.
+- **Wayland fallback:** `v4l2slh264dec` → `video/x-raw,format=I420` →
+  `videorate` (12fps cap) → `videoconvert` → `waylandsink`. The Pixman
+  compositor's I420→RGBx software conversion drops ~80% of frames at native
+  24fps; the 12fps cap makes it sustainable but produces distorted pixels due
+  to a buggy YM12→I420 system-memory conversion in the V4L2 plugin. Use only
+  when KMS mode is not available.
+- `WLR_RENDERER=gles2` does not work: Grate Mesa's EGL/DRI2 screen creation
+  fails under wlroots, so `zwp_linux_dmabuf_v1` DMABuf import through the
+  compositor is not available.
+- GStreamer `v4l2slh264dec` → `fakesink`: 30-second 360p clip decoded in 2.1s
+  (14× realtime).
+- Full episode `test1-main.mp4` (854×480 Constrained Baseline, 24fps, AAC LC)
+  played 3 minutes with VDE decode + KMS display + ALSA audio.
+
+**ALSA configuration (WM8903):**
+- DAC Companding: **off** (default was on; causes massive audio distortion).
+- ADC Companding: **off**.
+- Playback Deemphasis: **off**.
+- State saved: `/var/lib/alsa/asound.state`.
+- Boot restore: `/etc/local.d/sl101-alsa-restore.start`.
+
+**mpv software decode qualified:**
+- `mpv --hwdec=no --vo=wlshm` with PipeWire audio output connected and played
+  the 360p test clip. Drops ~50% of frames at 24fps on the dual-core ARMv7
+  (no NEON), A-V sync within ±35ms.
+
+**Not yet qualified:** full 720p playback (requires High→Main transcode or
+lower resolution), touch/keyboard stop, GL-accelerated compositor display path.
+
+SSH from host requires explicit Wayland environment:
+`XDG_RUNTIME_DIR=/run/sl101-desktop-user WAYLAND_DISPLAY=wayland-0`.
 
 ## Rollback
 

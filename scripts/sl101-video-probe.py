@@ -59,6 +59,63 @@ def vde_config(kernel):
     return {"source": None, "value": "unknown"}
 
 
+def vde_device_status():
+    """Check whether the VDE device is present, loaded, and has the expected V4L2 caps."""
+    video0 = Path("/dev/video0")
+    media0 = Path("/dev/media0")
+    result = {
+        "video_device": str(video0),
+        "video_device_present": video0.exists() and stat.S_ISCHR(video0.stat().st_mode),
+        "media_device_present": media0.exists(),
+        "module_loaded": False,
+        "driver": None,
+        "profiles": [],
+        "decode_format": None,
+        "output_formats": [],
+        "gstreamer_v4l2slh264dec": False,
+    }
+    modules = read_text("/proc/modules") or ""
+    result["module_loaded"] = any(
+        line.split()[0] == "tegra_vde" for line in modules.splitlines() if line.split()
+    )
+    if result["video_device_present"]:
+        info = bounded_command(["v4l2-ctl", "-d", "/dev/video0", "--info"])
+        if info and info.get("exit_code") == 0:
+            for line in info["output"].splitlines():
+                if "Driver name" in line and ":" in line:
+                    result["driver"] = line.split(":", 1)[1].strip()
+        fmts_out = bounded_command(["v4l2-ctl", "-d", "/dev/video0", "--list-formats-out"])
+        if fmts_out and fmts_out.get("exit_code") == 0:
+            for line in fmts_out["output"].splitlines():
+                if "'" in line:
+                    parts = line.split("'")
+                    if len(parts) >= 2:
+                        result["output_formats"].append(parts[1])
+        fmts_cap = bounded_command(["v4l2-ctl", "-d", "/dev/video0", "--list-formats"])
+        if fmts_cap and fmts_cap.get("exit_code") == 0:
+            for line in fmts_cap["output"].splitlines():
+                if "'" in line:
+                    parts = line.split("'")
+                    if len(parts) >= 2:
+                        result["decode_format"] = parts[1]
+        ctrls = bounded_command(["v4l2-ctl", "-d", "/dev/video0", "--list-ctrls-menus"])
+        if ctrls and ctrls.get("exit_code") == 0:
+            in_profile = False
+            for line in ctrls["output"].splitlines():
+                if "h264_profile" in line:
+                    in_profile = True
+                    continue
+                if in_profile:
+                    stripped = line.strip()
+                    if stripped and stripped[0].isdigit() and ":" in stripped:
+                        result["profiles"].append(stripped.split(":", 1)[1].strip())
+                    elif not stripped.startswith(("(", " ")):
+                        in_profile = False
+    gst = bounded_command(["gst-inspect-1.0", "v4l2slh264dec"])
+    result["gstreamer_v4l2slh264dec"] = bool(gst and gst.get("exit_code") == 0)
+    return result
+
+
 def wayland_socket():
     display = os.environ.get("WAYLAND_DISPLAY", "wayland-0")
     runtime = os.environ.get("XDG_RUNTIME_DIR", "")
@@ -91,8 +148,24 @@ def collect():
         video_nodes.append({"path": str(path), "name": name})
     wayland = wayland_socket()
     config = vde_config(kernel)
+    device = vde_device_status()
+    vde_ready = (
+        device["module_loaded"]
+        and device["video_device_present"]
+        and device["driver"] == "tegra-vde"
+        and "S264" in device.get("output_formats", [])
+        and device["gstreamer_v4l2slh264dec"]
+    )
+    if vde_ready:
+        hw_status = "ready"
+        hw_note = ("VDE H.264 stateless decoder operational via GStreamer v4l2slh264dec. "
+                   "Supported profiles: " + ", ".join(device.get("profiles", [])) + ". "
+                   "High-profile content requires transcoding to Main/Baseline.")
+    else:
+        hw_status = "unqualified"
+        hw_note = "VDE requires tegra-vde module, /dev/video0, S264 format and gst-plugins-bad v4l2codecs."
     report = {
-        "schema": "sl101.local-video-probe/v1",
+        "schema": "sl101.local-video-probe/v2",
         "readonly": True,
         "identity": {
             "kernel": kernel, "kernel_matches_expected": kernel == EXPECTED_KERNEL,
@@ -109,8 +182,10 @@ def collect():
         "vde": {
             "kernel_config": config,
             "video_nodes": video_nodes,
-            "hardware_decoding_status": "unqualified",
-            "note": "VDE requires decoder device and working V4L2 request userspace; Grate GLES2 does not prove VDE.",
+            "device": device,
+            "hardware_decoding_status": hw_status,
+            "ready_for_vde_launch": vde_ready and wayland["is_socket"] and wayland["accessible"],
+            "note": hw_note,
         },
         "audio": {
             "pulse_server_variable_set": bool(os.environ.get("PULSE_SERVER")),

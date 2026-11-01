@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 PLAYER = ROOT / "scripts/sl101-video-play.sh"
+VDE_PLAYER = ROOT / "scripts/sl101-video-play-vde.sh"
 TRANSCODE = ROOT / "scripts/sl101-video-transcode.sh"
 PROBE = ROOT / "scripts/sl101-video-probe.py"
 DEPLOY = ROOT / "scripts/sl101-video-deploy.sh"
@@ -110,16 +111,41 @@ class VideoToolingTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("pinned known-hosts unavailable", result.stderr)
 
-    def test_vde_status_never_promoted_from_config_or_device(self):
+    def test_vde_status_requires_full_device_chain(self):
         with patch.object(probe, "vde_config", return_value={"source": "/fake/config",
                                                               "value": "y"}), \
+             patch.object(probe, "vde_device_status", return_value={
+                 "video_device": "/dev/video0", "video_device_present": True,
+                 "media_device_present": True, "module_loaded": True,
+                 "driver": "tegra-vde", "profiles": ["Baseline", "Main"],
+                 "decode_format": "YM12", "output_formats": ["S264"],
+                 "gstreamer_v4l2slh264dec": True,
+             }), \
+             patch.object(probe, "wayland_socket", return_value={
+                 "path": "/x", "is_socket": True, "accessible": True
+             }):
+            report = probe.collect()
+        self.assertEqual(report["vde"]["hardware_decoding_status"], "ready")
+        self.assertTrue(report["vde"]["ready_for_vde_launch"])
+        self.assertEqual(report["schema"], "sl101.local-video-probe/v2")
+        self.assertTrue(report["readonly"])
+
+    def test_vde_unqualified_without_gstreamer_decoder(self):
+        with patch.object(probe, "vde_config", return_value={"source": "/fake/config",
+                                                              "value": "y"}), \
+             patch.object(probe, "vde_device_status", return_value={
+                 "video_device": "/dev/video0", "video_device_present": True,
+                 "media_device_present": True, "module_loaded": True,
+                 "driver": "tegra-vde", "profiles": ["Baseline", "Main"],
+                 "decode_format": "YM12", "output_formats": ["S264"],
+                 "gstreamer_v4l2slh264dec": False,
+             }), \
              patch.object(probe, "wayland_socket", return_value={
                  "path": "/x", "is_socket": True, "accessible": True
              }):
             report = probe.collect()
         self.assertEqual(report["vde"]["hardware_decoding_status"], "unqualified")
-        self.assertEqual(report["schema"], "sl101.local-video-probe/v1")
-        self.assertTrue(report["readonly"])
+        self.assertFalse(report["vde"]["ready_for_vde_launch"])
 
     def test_probe_reports_json_without_device_mutation(self):
         result = subprocess.run(["python3", str(PROBE)], check=True, capture_output=True,
@@ -127,6 +153,70 @@ class VideoToolingTests(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertIn("video_nodes", payload["vde"])
         self.assertIn("ready_for_software_launch", payload["software"])
+        self.assertIn("ready_for_vde_launch", payload["vde"])
+        self.assertIn("device", payload["vde"])
+
+    def test_vde_player_dry_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "test movie.mp4"
+            path.write_bytes(b"fixture")
+            result = subprocess.run(["sh", str(VDE_PLAYER), "--dry-run", "--", str(path)],
+                                    text=True, capture_output=True, check=True)
+            self.assertIn("VDE", result.stdout)
+            self.assertIn(str(path), result.stdout)
+            self.assertIn("v4l2slh264dec", result.stdout)
+            self.assertIn("kmssink", result.stdout)
+
+    def test_vde_player_dry_run_wayland(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "test.mp4"
+            path.write_bytes(b"fixture")
+            result = subprocess.run(["sh", str(VDE_PLAYER), "--wayland", "--dry-run", "--", str(path)],
+                                    text=True, capture_output=True, check=True)
+            self.assertIn("waylandsink", result.stdout)
+            self.assertIn("fps_cap: 12", result.stdout)
+
+    def test_vde_player_fps_override(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "test.mp4"
+            path.write_bytes(b"fixture")
+            result = subprocess.run(["sh", str(VDE_PLAYER), "--wayland", "--fps", "24", "--dry-run", "--", str(path)],
+                                    text=True, capture_output=True, check=True)
+            self.assertIn("fps_cap: 24", result.stdout)
+
+    def test_vde_player_rejects_invalid_fps(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "test.mp4"
+            path.write_bytes(b"fixture")
+            result = subprocess.run(["sh", str(VDE_PLAYER), "--fps", "0", "--", str(path)],
+                                    text=True, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            result = subprocess.run(["sh", str(VDE_PLAYER), "--fps", "99", "--", str(path)],
+                                    text=True, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+
+    def test_vde_player_missing_file_fails_closed(self):
+        result = subprocess.run(["sh", str(VDE_PLAYER), "--", "/does/not/exist.mp4"],
+                                text=True, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not a readable regular file", result.stderr)
+
+    def test_transcode_profile_main_accepted(self):
+        result = subprocess.run(["sh", str(TRANSCODE), "--codec", "h264", "--profile", "main",
+                                 "--", "/nonexistent/input.mp4", "/tmp/out.mp4"],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("profile must be", result.stderr)
+
+    def test_transcode_rejects_invalid_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "source.mp4"
+            source.write_bytes(b"fixture")
+            result = subprocess.run(["sh", str(TRANSCODE), "--profile", "high",
+                                     "--", str(source), str(Path(tmp) / "out.mp4")],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("profile must be", result.stderr)
 
 
 if __name__ == "__main__":
