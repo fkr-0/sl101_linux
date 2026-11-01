@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PLAYER = ROOT / "scripts/sl101-video-play.sh"
 TRANSCODE = ROOT / "scripts/sl101-video-transcode.sh"
 PROBE = ROOT / "scripts/sl101-video-probe.py"
+DEPLOY = ROOT / "scripts/sl101-video-deploy.sh"
 spec = importlib.util.spec_from_file_location("sl101_video_probe", PROBE)
 probe = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(probe)
@@ -93,6 +94,21 @@ class VideoToolingTests(unittest.TestCase):
                                      "--", str(source), str(Path(tmp) / "new.mp4")],
                                     capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
+
+    def test_deploy_default_is_readonly_review(self):
+        result = subprocess.run(["sh", str(DEPLOY)], cwd=ROOT,
+                                capture_output=True, text=True, check=True)
+        self.assertIn("deployment", result.stdout)
+        self.assertIn("expected CID", result.stdout)
+        self.assertIn("no player package", result.stdout)
+
+    def test_deploy_fails_closed_without_pinned_host_key(self):
+        env = os.environ.copy()
+        env["SL101_KNOWN_HOSTS"] = "/nonexistent/sl101-video-pinned-host"
+        result = subprocess.run(["sh", str(DEPLOY), "--apply"], cwd=ROOT,
+                                capture_output=True, text=True, env=env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("pinned known-hosts unavailable", result.stderr)
 
     def test_vde_status_never_promoted_from_config_or_device(self):
         with patch.object(probe, "vde_config", return_value={"source": "/fake/config",

@@ -34,6 +34,9 @@ low-complexity 360p MPEG-4 Part 2 + AAC MP4 compatibility file.
 
 - `scripts/sl101-video-play.sh`: actual local video-file player with mpv,
   fail-closed file and Wayland socket checks, optional fullscreen/mute.
+- `scripts/sl101-video-deploy.sh`: review-only-by-default, SHA-256 checked
+  launcher deployment gated on pinned SSH identity, SD CID, kernel, root UUID,
+  and existing SL101 qualification lock. It does **not** install mpv.
 - `scripts/sl101-video-transcode.sh`: creates low-complexity MP4 copy using a
   **host** with FFmpeg; refuses overwrite.
 - `scripts/sl101-video-probe.py`: read-only JSON report of kernel identity,
@@ -72,12 +75,24 @@ flags. An absent `mpv` package blocks v1 until an ARMv7 VFPv3-D16-safe native
 player is built/installed; the existing glibc Cog browser root is **not**
 implicitly used as a general application runtime.
 
-After transferring a local file to a readable directory on SL101, use the
-*normal running labwc Wayland session* (or its correct environment):
+On the development host, review launcher deployment (no network or mutations)
+then explicitly apply **only** when the authorized SL101 is available and the
+qualification lane is free:
 
-    python3 scripts/sl101-video-probe.py
-    sh scripts/sl101-video-play.sh --dry-run -- "/path/movie.mp4"
-    sh scripts/sl101-video-play.sh --fullscreen -- "/path/movie.mp4"
+    sh scripts/sl101-video-deploy.sh
+    # Explicit device change:
+    # sh scripts/sl101-video-deploy.sh --apply
+
+The hash-qualified launcher then lives at `/usr/local/bin/sl101-video-play`;
+no video player package or video media is installed by deployment. For a local
+source file, transfer it through your approved transport to a readable directory
+on the tablet.
+
+In the *normal running labwc Wayland session* (or its correct environment):
+
+    python3 /path/to/sl101-video-probe.py  # copied separately as needed
+    /usr/local/bin/sl101-video-play --dry-run -- "/path/movie.mp4"
+    /usr/local/bin/sl101-video-play --fullscreen -- "/path/movie.mp4"
 
 The script refuses to launch without a usable Wayland socket or mpv's `wlshm`
 output. A remote SSH shell may not inherit the live session's
@@ -117,8 +132,11 @@ codec throughput, display and audio are therefore unknown.
 
 ## Rollback
 
-No installation performed by these scripts. Stop the playback process; remove
-the copied media or optional native mpv package only if it was specifically
+No installation performed unless the optional deploy `--apply` or a separate
+package-manager command is explicitly run. To retire the launcher, first
+verify its SHA-256 matches the reviewed deployment hash, then remove only
+`/usr/local/bin/sl101-video-play`. Stop playback; remove the copied media or
+optional native mpv package only if it was specifically
 installed for this trial and no other application uses it. Revert just the
 repository scripts to retire this lane. The tested Grate candidate and Pixman
 default are unaffected.
