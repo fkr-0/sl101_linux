@@ -1,0 +1,117 @@
+diff --git a/src/gallium/drivers/grate/vp/tgsi.c b/src/gallium/drivers/grate/vp/tgsi.c
+--- a/src/gallium/drivers/grate/vp/tgsi.c
++++ b/src/gallium/drivers/grate/vp/tgsi.c
+@@ -152,8 +152,26 @@
+    return emit_vec_unop(VP_VEC_OP_MOV, dst, src);
+ }
+ 
+ static struct vp_vec_instr
++emit_vFRC(struct vp_dst_operand dst, struct vp_src_operand src)
++{
++   return emit_vec_unop(VP_VEC_OP_FRC, dst, src);
++}
++
++static struct vp_vec_instr
++emit_vFLR(struct vp_dst_operand dst, struct vp_src_operand src)
++{
++   return emit_vec_unop(VP_VEC_OP_FLR, dst, src);
++}
++
++static struct vp_vec_instr
++emit_vSSG(struct vp_dst_operand dst, struct vp_src_operand src)
++{
++   return emit_vec_unop(VP_VEC_OP_SSG, dst, src);
++}
++
++static struct vp_vec_instr
+ emit_vADD(struct vp_dst_operand dst, struct vp_src_operand src0,
+           struct vp_src_operand src2)
+ {
+    struct vp_vec_instr ret = {
+@@ -173,11 +191,20 @@
+ }
+ 
+ GEN_V_BINOP(MUL)
+ GEN_V_BINOP(DP3)
++/* DPH is a hardware opcode, but Mesa 25.0.7 TGSI has no DPH token.
++ * Keep the emitter available for future IR lowering without fabricating
++ * a conflicting TGSI opcode value. */
++GEN_V_BINOP(DPH)
+ GEN_V_BINOP(DP4)
++GEN_V_BINOP(DST)
+ GEN_V_BINOP(SLT)
++GEN_V_BINOP(SGE)
+ GEN_V_BINOP(MAX)
++GEN_V_BINOP(MIN)
++GEN_V_BINOP(SEQ)
++GEN_V_BINOP(SNE)
+ 
+ static struct vp_vec_instr
+ emit_vMAD(struct vp_dst_operand dst, struct vp_src_operand src0,
+           struct vp_src_operand src1, struct vp_src_operand src2)
+@@ -390,20 +417,65 @@
+                                    tgsi_src_to_vp(vp, &inst->Src[0].Register),
+                                    tgsi_src_to_vp(vp, &inst->Src[1].Register)),
+                          emit_sNOP());
+ 
++   case TGSI_OPCODE_DST:
++      return emit_packed(emit_vDST(tgsi_dst_to_vp(vp, &inst->Dst[0].Register, saturate),
++                                   tgsi_src_to_vp(vp, &inst->Src[0].Register),
++                                   tgsi_src_to_vp(vp, &inst->Src[1].Register)),
++                         emit_sNOP());
++
+    case TGSI_OPCODE_SLT:
+       return emit_packed(emit_vSLT(tgsi_dst_to_vp(vp, &inst->Dst[0].Register, saturate),
+                                    tgsi_src_to_vp(vp, &inst->Src[0].Register),
+                                    tgsi_src_to_vp(vp, &inst->Src[1].Register)),
+                          emit_sNOP());
+ 
++   case TGSI_OPCODE_SGE:
++      return emit_packed(emit_vSGE(tgsi_dst_to_vp(vp, &inst->Dst[0].Register, saturate),
++                                   tgsi_src_to_vp(vp, &inst->Src[0].Register),
++                                   tgsi_src_to_vp(vp, &inst->Src[1].Register)),
++                         emit_sNOP());
++
+    case TGSI_OPCODE_MAX:
+       return emit_packed(emit_vMAX(tgsi_dst_to_vp(vp, &inst->Dst[0].Register, saturate),
+                                    tgsi_src_to_vp(vp, &inst->Src[0].Register),
+                                    tgsi_src_to_vp(vp, &inst->Src[1].Register)),
+                          emit_sNOP());
+ 
++   case TGSI_OPCODE_MIN:
++      return emit_packed(emit_vMIN(tgsi_dst_to_vp(vp, &inst->Dst[0].Register, saturate),
++                                   tgsi_src_to_vp(vp, &inst->Src[0].Register),
++                                   tgsi_src_to_vp(vp, &inst->Src[1].Register)),
++                         emit_sNOP());
++
++   case TGSI_OPCODE_SEQ:
++      return emit_packed(emit_vSEQ(tgsi_dst_to_vp(vp, &inst->Dst[0].Register, saturate),
++                                   tgsi_src_to_vp(vp, &inst->Src[0].Register),
++                                   tgsi_src_to_vp(vp, &inst->Src[1].Register)),
++                         emit_sNOP());
++
++   case TGSI_OPCODE_SNE:
++      return emit_packed(emit_vSNE(tgsi_dst_to_vp(vp, &inst->Dst[0].Register, saturate),
++                                   tgsi_src_to_vp(vp, &inst->Src[0].Register),
++                                   tgsi_src_to_vp(vp, &inst->Src[1].Register)),
++                         emit_sNOP());
++
++   case TGSI_OPCODE_FRC:
++      return emit_packed(emit_vFRC(tgsi_dst_to_vp(vp, &inst->Dst[0].Register, saturate),
++                                   tgsi_src_to_vp(vp, &inst->Src[0].Register)),
++                         emit_sNOP());
++
++   case TGSI_OPCODE_FLR:
++      return emit_packed(emit_vFLR(tgsi_dst_to_vp(vp, &inst->Dst[0].Register, saturate),
++                                   tgsi_src_to_vp(vp, &inst->Src[0].Register)),
++                         emit_sNOP());
++
++   case TGSI_OPCODE_SSG:
++      return emit_packed(emit_vSSG(tgsi_dst_to_vp(vp, &inst->Dst[0].Register, saturate),
++                                   tgsi_src_to_vp(vp, &inst->Src[0].Register)),
++                         emit_sNOP());
++
+    case TGSI_OPCODE_MAD:
+       return emit_packed(emit_vMAD(tgsi_dst_to_vp(vp, &inst->Dst[0].Register, saturate),
+                                    tgsi_src_to_vp(vp, &inst->Src[0].Register),
+                                    tgsi_src_to_vp(vp, &inst->Src[1].Register),
