@@ -1,0 +1,158 @@
+--- a/src/gallium/drivers/grate/fp/tgsi.c
++++ b/src/gallium/drivers/grate/fp/tgsi.c
+@@ -409,6 +402,37 @@
+    };
+ }
+ 
++/*
++ * Hardware CSEL is (rA < 0) ? rB : (rC * rD), NOT a 4-input compare.
++ * With rD disabled, hardware supplies 1.0 and returns rC on false.
++ */
++static struct fp_alu_instr
++fp_make_csel(struct fp_alu_dst_operand dst,
++             struct fp_alu_src_operand predicate,
++             struct fp_alu_src_operand val_negative,
++             struct fp_alu_src_operand val_nonnegative)
++{
++   return (struct fp_alu_instr) {
++      .op = FP_ALU_OP_CSEL,
++      .dst = dst,
++      .src = { predicate, val_negative, val_nonnegative,
++               fp_src_disabled_one() },
++   };
++}
++
++/* ALU condition_code tests the arithmetic result against zero. */
++static struct fp_alu_instr
++fp_make_compare(enum fp_condition condition,
++                struct fp_alu_dst_operand dst,
++                struct fp_alu_src_operand a,
++                struct fp_alu_src_operand b)
++{
++   b.negate = !b.negate;
++   struct fp_alu_instr instr = fp_make_add(dst, a, b);
++   instr.condition = condition;
++   return instr;
++}
++
+ static bool
+ fp_instruction_uses_embedded(const struct grate_fp_shader *fp,
+                              const struct tgsi_full_instruction *inst)
+@@ -476,9 +500,18 @@
+    const struct tgsi_src_register *a = &tgsi_inst->Src[first_src].Register;
+    const struct tgsi_src_register *b = &tgsi_inst->Src[second_src].Register;
+ 
+-   if (tgsi_inst->Instruction.Opcode != TGSI_OPCODE_ADD &&
+-       tgsi_inst->Instruction.Opcode != TGSI_OPCODE_MUL)
+-      return fp_fail(fp, "two-varying row conflict currently supports ADD/MUL only");
++   switch (tgsi_inst->Instruction.Opcode) {
++   case TGSI_OPCODE_ADD:
++   case TGSI_OPCODE_MUL:
++   case TGSI_OPCODE_SLT:
++   case TGSI_OPCODE_SGE:
++   case TGSI_OPCODE_SEQ:
++   case TGSI_OPCODE_SNE:
++      break;
++   default:
++      return fp_fail(fp, "unsupported two-varying fragment opcode %u",
++                     tgsi_inst->Instruction.Opcode);
++   }
+    if (a->Index >= FP_ROW_REG_COUNT || b->Index >= FP_ROW_REG_COUNT)
+       return fp_fail(fp, "two-varying row conflict exceeds TRAM row range");
+    if (list_length(&fp->fp_instructions) >= 63 ||
+@@ -527,10 +560,42 @@
+    }
+    struct fp_alu_src_operand left = fp_src_row(scratch_row);
+    struct fp_alu_src_operand right = fp_src_row(swizzle);
+-   if (tgsi_inst->Instruction.Opcode == TGSI_OPCODE_ADD)
++   switch (tgsi_inst->Instruction.Opcode) {
++   case TGSI_OPCODE_ADD:
+       alu->slots[0] = fp_make_add(d, left, right);
+-   else
++      break;
++   case TGSI_OPCODE_MUL:
+       alu->slots[0] = fp_make_mul(d, left, right);
++      break;
++   case TGSI_OPCODE_SLT:
++      alu->slots[0] = fp_make_compare(FP_CONDITION_GREATER, d,
++                                       right, left);
++      break;
++   case TGSI_OPCODE_SGE:
++      alu->slots[0] = fp_make_compare(FP_CONDITION_GEQUAL, d,
++                                       left, right);
++      break;
++   case TGSI_OPCODE_SEQ:
++      alu->slots[0] = fp_make_compare(FP_CONDITION_EQUAL, d,
++                                       left, right);
++      break;
++   case TGSI_OPCODE_SNE: {
++      struct fp_alu_src_operand equal = {
++         .enable = true,
++         .index = FP_ALU_RESULT_BASE,
++         .datatype = FP_DATATYPE_FIXED10,
++         .negate = true,
++      };
++      alu->slots[0] = fp_make_compare(FP_CONDITION_EQUAL,
++                                      (struct fp_alu_dst_operand){0},
++                                      left, right);
++      alu->slots[1] = fp_make_add(d, equal, fp_src_one());
++      break;
++   }
++   default:
++      /* Validated by the switch above. */
++      unreachable("unhandled two-varying fragment opcode");
++   }
+ 
+    inst->mfu_sched.address = list_length(&fp->mfu_instructions);
+    inst->mfu_sched.num_instructions = 2;
+@@ -647,6 +711,9 @@
+     * four ALUs available and remains one packet.
+     */
+    unsigned group_limit = fp_instruction_uses_embedded(fp, tgsi_inst) ? 1 : 4;
++   /* SNE needs a paired ALU0/ALU1 sequence per component. */
++   if (tgsi_inst->Instruction.Opcode == TGSI_OPCODE_SNE)
++      group_limit = 1;
+    for (unsigned i = 0; i < num_components; ++i) {
+       unsigned a, b, swz;
+       if (fp_find_two_input_row_conflict(tgsi_inst, components[i],
+@@ -737,6 +804,40 @@
+          case TGSI_OPCODE_MAX:
+             alu->slots[slot] = fp_make_max(d, src[0], src[1]);
+             break;
++         case TGSI_OPCODE_SLT:
++            /* (b - a) > 0 means a < b. */
++            alu->slots[slot] = fp_make_compare(FP_CONDITION_GREATER,
++                                                d, src[1], src[0]);
++            break;
++         case TGSI_OPCODE_SGE:
++            alu->slots[slot] = fp_make_compare(FP_CONDITION_GEQUAL,
++                                                d, src[0], src[1]);
++            break;
++         case TGSI_OPCODE_SEQ:
++            alu->slots[slot] = fp_make_compare(FP_CONDITION_EQUAL,
++                                                d, src[0], src[1]);
++            break;
++         case TGSI_OPCODE_SNE: {
++            /*
++             * ALU0 evaluates EQ to 0/1 and exposes x0; ALU1 emits 1-x0.
++             * With group_limit=1 there is no collision with other lanes.
++             */
++            struct fp_alu_dst_operand discard = {0};
++            struct fp_alu_src_operand equal = {
++               .enable = true,
++               .index = FP_ALU_RESULT_BASE,
++               .datatype = FP_DATATYPE_FIXED10,
++               .negate = true,
++            };
++            alu->slots[0] = fp_make_compare(FP_CONDITION_EQUAL,
++                                            discard, src[0], src[1]);
++            alu->slots[1] = fp_make_add(d, equal, fp_src_one());
++            break;
++         }
++         case TGSI_OPCODE_CMP:
++            /* CMP(a,b,c) selects b when a < 0, otherwise c. */
++            alu->slots[slot] = fp_make_csel(d, src[0], src[1], src[2]);
++            break;
+          default:
+             fp_fail(fp, "unsupported fragment TGSI opcode %u",
+                     tgsi_inst->Instruction.Opcode);
