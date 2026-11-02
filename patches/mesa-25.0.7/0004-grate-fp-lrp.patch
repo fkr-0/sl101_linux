@@ -1,0 +1,243 @@
+--- a/src/gallium/drivers/grate/fp/tgsi.c
++++ b/src/gallium/drivers/grate/fp/tgsi.c
+@@ -1158,6 +1158,230 @@
+    return false;
+ }
+ 
++
++/*
++ * The first ALU EXEC stores (a - b) in a reserved FP20 scalar GPR;
++ * the second computes (a - b) * t + b.  A free declared TEMP vec4 is
++ * required: the physical FP has only two vec4 GPR banks.  Never
++ * overwrite a TGSI temporary that the application owns.
++ */
++static bool
++fp_lrp_setup_tex(struct grate_fp_shader *fp,
++                 const struct fp_lowering_state *lowering,
++                 struct fp_instr *inst,
++                 struct fp_mfu_instr *mfu,
++                 int varying_rows[4],
++                 bool *uses_mfu,
++                 int tex_temp_index)
++{
++   if (tex_temp_index < 0)
++      return true;
++
++   const struct fp_pending_tex *pending =
++      &lowering->pending_tex[tex_temp_index];
++
++   if (!pending->valid || pending->coord.File != TGSI_FILE_INPUT ||
++       pending->coord.Index >= FP_ROW_REG_COUNT ||
++       pending->sampler_index >= 16)
++      return fp_fail(fp, "invalid deferred fragment LRP texture alias");
++
++   for (unsigned c = 0; c < 2; ++c) {
++      if (varying_rows[c] >= 0 &&
++          varying_rows[c] != (int)pending->coord.Index)
++         return fp_fail(fp, "LRP texture coordinate conflicts with ALU varying row");
++
++      varying_rows[c] = pending->coord.Index;
++      mfu->var[c].op = FP_VAR_OP_FP20;
++      mfu->var[c].tram_row = pending->coord.Index;
++   }
++
++   if ((int)pending->coord.Index + 1 > fp->info.max_tram_row)
++      fp->info.max_tram_row = pending->coord.Index + 1;
++
++   *uses_mfu = true;
++   inst->tex.enable = true;
++   inst->tex.sampler_index = pending->sampler_index;
++   inst->tex.src_regs_select = 0;
++   inst->tex.sample_dst_regs_select = 0;
++   return true;
++}
++
++static bool
++fp_emit_lrp(struct grate_fp_shader *fp,
++            struct fp_lowering_state *lowering,
++            const struct tgsi_full_instruction *tgsi)
++{
++   const struct tgsi_dst_register *dst = &tgsi->Dst[0].Register;
++   const bool saturate = tgsi->Instruction.Saturate != 0;
++   const unsigned declared = lowering->declared_temps;
++   unsigned scratch_base;
++
++   if (tgsi->Instruction.NumSrcRegs != 3)
++      return fp_fail(fp, "fragment LRP requires exactly three sources");
++
++   /* TGSI declarations reserve the low numbered TEMP vec4 GPR banks. */
++   if (declared >= FP_GPR_COUNT / 4)
++      return fp_fail(fp, "fragment LRP requires one unused TEMP vec4 for scratch");
++   scratch_base = declared * 4;
++
++   /*
++    * Multi-component in-place LRP can overwrite input swizzles before
++    * the later component is evaluated.  Reject rather than miscompile.
++    */
++   if (dst->File == TGSI_FILE_TEMPORARY &&
++       (dst->WriteMask & (dst->WriteMask - 1))) {
++      for (unsigned s = 0; s < 3; ++s) {
++         const struct tgsi_src_register *src = &tgsi->Src[s].Register;
++         if (src->File == TGSI_FILE_TEMPORARY && src->Index == dst->Index)
++            return fp_fail(fp, "fragment LRP in-place vector write needs a source snapshot");
++      }
++   }
++
++   /*
++    * TGSI sources all observe the state before this instruction.  Scalar
++    * MOV aliases and deferred TEX aliases are resolved from this snapshot,
++    * then invalidated only when the complete LRP has been emitted.
++    */
++   struct fp_lowering_state reads = *lowering;
++
++   for (unsigned component = 0; component < 4; ++component) {
++      if (!(dst->WriteMask & (1u << component)))
++         continue;
++
++      if (list_length(&fp->fp_instructions) + 2 > 63 ||
++          list_length(&fp->alu_instructions) + 2 > 63)
++         return fp_fail(fp, "fragment LRP exceeds 63 PSEQ/ALU packet entries");
++
++      struct fp_alu_dst_operand result;
++      if (!fp_dst_component(fp, dst, component, saturate, &result))
++         return false;
++
++      const unsigned scratch_scalar = scratch_base + component;
++      struct fp_alu_dst_operand scratch = {
++         .index = FP_GPR_BASE + scratch_scalar,
++         .write_low_sub_reg = true,
++         .write_high_sub_reg = true,
++      };
++
++      struct fp_instr *inst[2] = { NULL, NULL };
++      struct fp_alu_instr_packet *alu[2] = { NULL, NULL };
++      struct fp_mfu_instr *mfu[2] = { NULL, NULL };
++      bool uses_mfu[2] = { false, false };
++
++      for (unsigned phase = 0; phase < 2; ++phase) {
++         inst[phase] = CALLOC_STRUCT(fp_instr);
++         alu[phase] = CALLOC_STRUCT(fp_alu_instr_packet);
++         mfu[phase] = CALLOC_STRUCT(fp_mfu_instr);
++         if (!inst[phase] || !alu[phase] || !mfu[phase]) {
++            fp_fail(fp, "out of memory lowering fragment LRP");
++            goto fail;
++         }
++
++         list_inithead(&inst[phase]->link);
++         list_inithead(&alu[phase]->link);
++         list_inithead(&mfu[phase]->link);
++
++         const unsigned first_index = phase == 0 ? 1 : 0;
++         struct fp_alu_src_operand first, b;
++         int varying_rows[4] = { -1, -1, -1, -1 };
++         int tex_temp_index = -1;
++
++         if (!fp_src_component(fp, &reads,
++                               alu[phase], mfu[phase], varying_rows,
++                               &tgsi->Src[first_index].Register,
++                               component, &first, &uses_mfu[phase],
++                               &tex_temp_index) ||
++             !fp_src_component(fp, &reads,
++                               alu[phase], mfu[phase], varying_rows,
++                               &tgsi->Src[2].Register,
++                               component, &b, &uses_mfu[phase],
++                               &tex_temp_index) ||
++             !fp_lrp_setup_tex(fp, &reads, inst[phase], mfu[phase],
++                               varying_rows, &uses_mfu[phase],
++                               tex_temp_index))
++            goto fail;
++
++         if (phase == 0) {
++            b.negate = !b.negate;
++            alu[phase]->slots[0] = fp_make_add(scratch, first, b);
++         } else {
++            alu[phase]->slots[0] =
++               fp_make_mad(result, fp_src_gpr(scratch_scalar), first, b);
++         }
++      }
++
++      if (list_length(&fp->mfu_instructions) +
++          (unsigned)uses_mfu[0] + (unsigned)uses_mfu[1] > 63) {
++         fp_fail(fp, "fragment LRP exceeds 63 MFU instructions");
++         goto fail;
++      }
++
++      for (unsigned phase = 0; phase < 2; ++phase) {
++         if (uses_mfu[phase]) {
++            inst[phase]->mfu_sched.address =
++               list_length(&fp->mfu_instructions);
++            inst[phase]->mfu_sched.num_instructions = 1;
++            list_addtail(&mfu[phase]->link, &fp->mfu_instructions);
++            mfu[phase] = NULL;
++         }
++
++         inst[phase]->alu_sched.address =
++            list_length(&fp->alu_instructions);
++         inst[phase]->alu_sched.num_instructions = 1;
++         inst[phase]->alu_complement = alu[phase]->complement;
++
++         if (phase == 1 && dst->File == TGSI_FILE_OUTPUT) {
++            /*
++             * Only the last written component should trigger the DW
++             * store; earlier components remain in r2/r3.
++             */
++            const unsigned later_mask = dst->WriteMask & (~0u << (component + 1));
++            if (!later_mask) {
++               inst[phase]->dw.enable = true;
++               inst[phase]->dw.index = 1 + dst->Index;
++               inst[phase]->dw.stencil_write = false;
++               inst[phase]->dw.src_regs = FP_DW_REGS_R2_R3;
++               fp_note_dw_exec(fp);
++            }
++         }
++
++         list_addtail(&alu[phase]->link, &fp->alu_instructions);
++         alu[phase] = NULL;
++         list_addtail(&inst[phase]->link, &fp->fp_instructions);
++         inst[phase] = NULL;
++         FREE(mfu[phase]);
++         mfu[phase] = NULL;
++      }
++      continue;
++
++fail:
++      for (unsigned phase = 0; phase < 2; ++phase) {
++         FREE(inst[phase]);
++         FREE(alu[phase]);
++         FREE(mfu[phase]);
++      }
++      return false;
++   }
++
++   if (dst->File == TGSI_FILE_TEMPORARY) {
++      if (dst->Index >= FP_GPR_COUNT / 4)
++         return fp_fail(fp, "fragment LRP destination TEMP[%u] exceeds GPR range",
++                        dst->Index);
++
++      for (unsigned component = 0; component < 4; ++component) {
++         if (!(dst->WriteMask & (1u << component)))
++            continue;
++         lowering->temp_alias[dst->Index * 4 + component].valid = false;
++         struct fp_pending_tex *pending = &lowering->pending_tex[dst->Index];
++         pending->component_mask &= ~(1u << component);
++         if (!pending->component_mask)
++            pending->valid = false;
++      }
++   }
++
++   return true;
++}
++
+ #define LINK_SRC(export_index, tram_row) \
+    (((export_index) << 3) | ((tram_row) << 9))
+ #define LINK_DST(index, comp, type) (((comp) | (type) << 2) << ((index) * 4))
+@@ -1254,6 +1478,9 @@
+          else if (tgsi->FullToken.FullInstruction.Instruction.Opcode != TGSI_OPCODE_END) {
+             const struct tgsi_full_instruction *inst = &tgsi->FullToken.FullInstruction;
+             switch (inst->Instruction.Opcode) {
++            case TGSI_OPCODE_LRP:
++               fp_emit_lrp(fp, &lowering, inst);
++               break;
+             case TGSI_OPCODE_LG2:
+                fp_emit_sfu_direct(fp, &lowering, inst, FP_SFU_OP_LG2);
+                break;
