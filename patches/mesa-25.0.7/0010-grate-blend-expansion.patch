@@ -1,0 +1,521 @@
+--- a/src/gallium/drivers/grate/grate_program.c
++++ b/src/gallium/drivers/grate/grate_program.c
+@@ -45,6 +45,274 @@
+    }
+ }
+ 
++/*
++ * Compile each blend variant from the same base IR. The source-over helper
++ * consumes the original DW and appends EXEC/ALU nodes, so reusing its result
++ * for another blend would silently build an incorrect cumulative program.
++ */
++static bool
++grate_fp_shader_clone(const struct grate_fp_shader *source,
++                      struct grate_fp_shader *copy)
++{
++   *copy = *source;
++   list_inithead(&copy->fp_instructions);
++   list_inithead(&copy->mfu_instructions);
++   list_inithead(&copy->alu_instructions);
++
++#define CLONE_INSTRUCTIONS(type, member) do {                            \
++   list_for_each_entry(struct type, orig, &source->member, link) {       \
++      struct type *item = CALLOC_STRUCT(type);                           \
++      if (!item)                                                         \
++         goto oom;                                                       \
++      *item = *orig;                                                     \
++      list_inithead(&item->link);                                       \
++      list_addtail(&item->link, &copy->member);                          \
++   }                                                                    \
++} while (0)
++   CLONE_INSTRUCTIONS(fp_instr, fp_instructions);
++   CLONE_INSTRUCTIONS(fp_mfu_instr, mfu_instructions);
++   CLONE_INSTRUCTIONS(fp_alu_instr_packet, alu_instructions);
++#undef CLONE_INSTRUCTIONS
++   return true;
++
++oom:
++   grate_fp_shader_cleanup(copy);
++   return false;
++}
++
++static struct fp_alu_src_operand
++grate_blend_src(unsigned reg, bool high)
++{
++   return (struct fp_alu_src_operand) {
++      .enable = true, .index = reg, .datatype = FP_DATATYPE_FIXED10,
++      .sub_reg_select_high = high,
++   };
++}
++
++static struct fp_alu_dst_operand
++grate_blend_dst(unsigned reg, bool high, bool saturate)
++{
++   return (struct fp_alu_dst_operand) {
++      .index = reg, .write_low_sub_reg = !high,
++      .write_high_sub_reg = high, .saturate = saturate,
++   };
++}
++
++static struct fp_alu_src_operand
++grate_blend_const(bool one, bool enabled)
++{
++   struct fp_alu_src_operand src = grate_blend_src(FP_LOWP_CONST_REG, one);
++   src.enable = enabled;
++   return src;
++}
++
++static struct fp_alu_instr
++grate_blend_mad(struct fp_alu_dst_operand dst,
++                struct fp_alu_src_operand a, struct fp_alu_src_operand b,
++                struct fp_alu_src_operand c)
++{
++   return (struct fp_alu_instr) {
++      .op = FP_ALU_OP_MAD, .dst = dst,
++      .src = { a, b, c, grate_blend_const(true, false) },
++   };
++}
++
++static struct fp_alu_instr
++grate_blend_mov(struct fp_alu_dst_operand dst,
++                struct fp_alu_src_operand src)
++{
++   return grate_blend_mad(dst, src, grate_blend_const(true, true),
++                          grate_blend_const(false, true));
++}
++
++static struct fp_alu_instr
++grate_blend_mul(struct fp_alu_dst_operand dst,
++                struct fp_alu_src_operand a, struct fp_alu_src_operand b)
++{
++   return grate_blend_mad(dst, a, b, grate_blend_const(false, true));
++}
++
++/* Preserve only the single color DW; stencil and MRT are not implemented. */
++static bool
++grate_blend_take_color_output(struct grate_fp_shader *fp, int *rt)
++{
++   if (fp->failed)
++      return false;
++
++   *rt = -1;
++   list_for_each_entry(struct fp_instr, inst, &fp->fp_instructions, link) {
++      if (!inst->dw.enable)
++         continue;
++      if (*rt >= 0 && *rt != inst->dw.index)
++         return false;
++      if (inst->dw.stencil_write)
++         return false;
++      *rt = inst->dw.index;
++   }
++   if (*rt < 0)
++      return false;
++
++   list_for_each_entry(struct fp_instr, inst, &fp->fp_instructions, link)
++      inst->dw.enable = false;
++   return true;
++}
++
++static struct fp_instr *
++grate_blend_exec(unsigned address, bool destination_fetch, int rt)
++{
++   struct fp_instr *inst = CALLOC_STRUCT(fp_instr);
++   if (!inst)
++      return NULL;
++
++   list_inithead(&inst->link);
++   inst->alu_sched.address = address;
++   inst->alu_sched.num_instructions = 1;
++   if (destination_fetch) {
++      inst->pseq = 0x0081000a;
++      inst->dw.enable = true;
++      inst->dw.index = rt;
++      inst->dw.src_regs = FP_DW_REGS_R0_R1;
++   }
++   return inst;
++}
++
++static struct fp_alu_instr_packet *
++grate_blend_packet(void)
++{
++   struct fp_alu_instr_packet *packet =
++      CALLOC_STRUCT(fp_alu_instr_packet);
++   if (packet)
++      list_inithead(&packet->link);
++   return packet;
++}
++
++static bool
++grate_fp_enable_additive_blend(struct grate_fp_shader *fp)
++{
++   struct fp_instr *save = NULL, *blend = NULL;
++   struct fp_alu_instr_packet *save_alu = NULL, *blend_alu = NULL;
++   int rt;
++
++   if (!grate_blend_take_color_output(fp, &rt))
++      return false;
++   if (!grate_fp_program_counts_supported(
++          list_length(&fp->fp_instructions) + 2,
++          list_length(&fp->mfu_instructions),
++          list_length(&fp->alu_instructions) + 2))
++      return false;
++
++   const unsigned next = list_length(&fp->alu_instructions);
++   save = grate_blend_exec(next, false, rt);
++   blend = grate_blend_exec(next + 1, true, rt);
++   save_alu = grate_blend_packet();
++   blend_alu = grate_blend_packet();
++   if (!save || !blend || !save_alu || !blend_alu)
++      goto oom;
++
++   for (unsigned c = 0; c < 4; ++c) {
++      const bool high = c & 1;
++      const unsigned out = c / 2;
++      const unsigned input = 2 + out;
++      save_alu->slots[c] =
++         grate_blend_mov(grate_blend_dst(out, high, false),
++                         grate_blend_src(input, high));
++      /* Saturate ADD(src,dst) to the fixed10 render-target range. */
++      blend_alu->slots[c] =
++         grate_blend_mad(grate_blend_dst(out, high, true),
++                         grate_blend_src(input, high),
++                         grate_blend_const(true, true),
++                         grate_blend_src(out, high));
++   }
++
++   list_addtail(&save_alu->link, &fp->alu_instructions);
++   list_addtail(&blend_alu->link, &fp->alu_instructions);
++   list_addtail(&save->link, &fp->fp_instructions);
++   list_addtail(&blend->link, &fp->fp_instructions);
++   fp->info.pseq_to_dw_exec_nb = list_length(&fp->fp_instructions);
++   return true;
++
++oom:
++   FREE(save); FREE(blend); FREE(save_alu); FREE(blend_alu);
++   return false;
++}
++
++static bool
++grate_fp_enable_standard_alpha_blend(struct grate_fp_shader *fp)
++{
++   struct fp_instr *premul = NULL, *premul_alpha = NULL, *blend = NULL;
++   struct fp_alu_instr_packet *premul_alu = NULL;
++   struct fp_alu_instr_packet *alpha_alu = NULL, *blend_alu = NULL;
++   int rt;
++
++   if (!grate_blend_take_color_output(fp, &rt))
++      return false;
++   if (!grate_fp_program_counts_supported(
++          list_length(&fp->fp_instructions) + 3,
++          list_length(&fp->mfu_instructions),
++          list_length(&fp->alu_instructions) + 3))
++      return false;
++
++   const unsigned next = list_length(&fp->alu_instructions);
++   premul = grate_blend_exec(next, false, rt);
++   premul_alpha = grate_blend_exec(next + 1, false, rt);
++   blend = grate_blend_exec(next + 2, true, rt);
++   premul_alu = grate_blend_packet();
++   alpha_alu = grate_blend_packet();
++   blend_alu = grate_blend_packet();
++   if (!premul || !premul_alpha || !blend ||
++       !premul_alu || !alpha_alu || !blend_alu)
++      goto oom;
++
++   /*
++    * The shader yields r2/r3 = semantic RGBA fixed10.  Stage 1 saves
++    * src.rgb * src.a into r0.l/r0.h/r1.l, and the ORIGINAL alpha into
++    * r4.l. Stage 2 computes src.a^2 into r1.h. Only stage 3 fetches the
++    * destination (overwriting r2/r3), so alpha remains in r4.l.
++    *
++    * All four components use SRC_ALPHA, including the alpha equation:
++    * src.a * src.a + dst.a * (1 - src.a).
++    */
++   const struct fp_alu_src_operand original_alpha = grate_blend_src(3, true);
++   const struct fp_alu_src_operand saved_alpha = grate_blend_src(4, false);
++   for (unsigned c = 0; c < 3; ++c) {
++      const bool high = c & 1;
++      premul_alu->slots[c] =
++         grate_blend_mul(grate_blend_dst(c / 2, high, false),
++                         grate_blend_src(2 + c / 2, high), original_alpha);
++   }
++   premul_alu->slots[3] =
++      grate_blend_mov(grate_blend_dst(4, false, false), original_alpha);
++   alpha_alu->slots[0] =
++      grate_blend_mul(grate_blend_dst(1, true, false),
++                      saved_alpha, saved_alpha);
++
++   struct fp_alu_src_operand factor = saved_alpha;
++   factor.minus_one = true;
++   for (unsigned c = 0; c < 4; ++c) {
++      const bool high = c & 1;
++      struct fp_alu_src_operand dst =
++         grate_blend_src(2 + c / 2, high);
++      dst.negate = true;
++      blend_alu->slots[c] =
++         grate_blend_mad(grate_blend_dst(c / 2, high, true),
++                         dst, factor, grate_blend_src(c / 2, high));
++   }
++
++   list_addtail(&premul_alu->link, &fp->alu_instructions);
++   list_addtail(&alpha_alu->link, &fp->alu_instructions);
++   list_addtail(&blend_alu->link, &fp->alu_instructions);
++   list_addtail(&premul->link, &fp->fp_instructions);
++   list_addtail(&premul_alpha->link, &fp->fp_instructions);
++   list_addtail(&blend->link, &fp->fp_instructions);
++   fp->info.pseq_to_dw_exec_nb = list_length(&fp->fp_instructions);
++   return true;
++
++oom:
++   FREE(premul); FREE(premul_alpha); FREE(blend);
++   FREE(premul_alu); FREE(alpha_alu); FREE(blend_alu);
++   return false;
++}
++
+ static void *
+ grate_create_vs_state(struct pipe_context *pcontext,
+                       const struct pipe_shader_state *template)
+@@ -253,6 +521,34 @@
+    blob->commands = buf.data;
+ }
+ 
++static void
++grate_pack_blend_variant(const struct grate_fp_shader *original,
++                         bool (*enable)(struct grate_fp_shader *),
++                         const char *name, struct grate_shader_blob *blob,
++                         struct grate_fp_info *info, bool *valid)
++{
++   struct grate_fp_shader fp;
++   if (!grate_fp_shader_clone(original, &fp)) {
++      fprintf(stderr, "grate: %s variant clone out of memory\n", name);
++      return;
++   }
++
++   if (enable(&fp) &&
++       grate_fp_program_counts_supported(
++          list_length(&fp.fp_instructions), list_length(&fp.mfu_instructions),
++          list_length(&fp.alu_instructions))) {
++      grate_pack_fp_blob(&fp, blob);
++      *info = fp.info;
++      *valid = true;
++   } else if (grate_debug & GRATE_DEBUG_FORMAT) {
++      fprintf(stderr, "grate: %s variant unavailable (fp=%u mfu=%u alu=%u)\n",
++              name, list_length(&fp.fp_instructions),
++              list_length(&fp.mfu_instructions),
++              list_length(&fp.alu_instructions));
++   }
++   grate_fp_shader_cleanup(&fp);
++}
++
+ static void *
+ grate_create_fs_state(struct pipe_context *pcontext,
+                       const struct pipe_shader_state *template)
+@@ -312,27 +608,17 @@
+    grate_pack_fp_blob(&fp, &so->blob);
+    so->info = fp.info;
+ 
+-   /*
+-    * Build the Tegra20 destination-fetch variant once. It is selected only
+-    * for Gallium's exact premultiplied source-over blend state.
+-    */
+-   if (grate_fp_enable_premultiplied_src_over(&fp)) {
+-      const unsigned blend_fp = list_length(&fp.fp_instructions);
+-      const unsigned blend_mfu = list_length(&fp.mfu_instructions);
+-      const unsigned blend_alu = list_length(&fp.alu_instructions);
+-
+-      if (grate_fp_program_counts_supported(blend_fp, blend_mfu, blend_alu)) {
+-         grate_pack_fp_blob(&fp, &so->src_over_blob);
+-         so->src_over_info = fp.info;
+-         so->src_over_valid = true;
+-      } else {
+-         fprintf(stderr,
+-                 "grate: source-over variant exceeds program limits: fp=%u mfu=%u alu=%u\n",
+-                 blend_fp, blend_mfu, blend_alu);
+-      }
+-   } else if (grate_debug & GRATE_DEBUG_FORMAT) {
+-      fprintf(stderr, "grate: source-over variant unavailable: %s\n", fp.error);
+-   }
++   /* Independent variants preserve the replace-path shader and one another. */
++   grate_pack_blend_variant(&fp, grate_fp_enable_premultiplied_src_over,
++                            "source-over", &so->src_over_blob,
++                            &so->src_over_info, &so->src_over_valid);
++   grate_pack_blend_variant(&fp, grate_fp_enable_standard_alpha_blend,
++                            "standard-alpha", &so->standard_alpha_blob,
++                            &so->standard_alpha_info,
++                            &so->standard_alpha_valid);
++   grate_pack_blend_variant(&fp, grate_fp_enable_additive_blend,
++                            "additive", &so->additive_blob,
++                            &so->additive_info, &so->additive_valid);
+ 
+    grate_fp_shader_cleanup(&fp);
+    return so;
+@@ -355,6 +641,8 @@
+ 
+    FREE(so->blob.commands);
+    FREE(so->src_over_blob.commands);
++   FREE(so->standard_alpha_blob.commands);
++   FREE(so->additive_blob.commands);
+    FREE(so);
+ }
+ 
+--- a/src/gallium/drivers/grate/grate_program.h
++++ b/src/gallium/drivers/grate/grate_program.h
+@@ -23,9 +23,15 @@
+    struct pipe_shader_state base;
+    struct grate_shader_blob blob;
+    struct grate_shader_blob src_over_blob;
++   struct grate_shader_blob standard_alpha_blob;
++   struct grate_shader_blob additive_blob;
+    struct grate_fp_info info;
+    struct grate_fp_info src_over_info;
++   struct grate_fp_info standard_alpha_info;
++   struct grate_fp_info additive_info;
+    bool src_over_valid;
++   bool standard_alpha_valid;
++   bool additive_valid;
+ };
+ 
+ void
+--- a/src/gallium/drivers/grate/grate_context.h
++++ b/src/gallium/drivers/grate/grate_context.h
+@@ -48,6 +48,8 @@
+    struct pipe_blend_color blend_color;
+    struct pipe_blend_state *blend;
+    bool blend_src_over;
++   bool blend_standard_alpha;
++   bool blend_additive;
+    bool blend_unsupported;
+    struct pipe_scissor_state scissor;
+    struct grate_zsa_state *zsa;
+--- a/src/gallium/drivers/grate/grate_state.c
++++ b/src/gallium/drivers/grate/grate_state.c
+@@ -265,6 +265,31 @@
+ }
+ 
+ static bool
++grate_blend_is_disabled_or_replace(const struct pipe_blend_state *blend)
++{
++   if (!blend)
++      return true;
++   if (blend->logicop_enable || blend->independent_blend_enable)
++      return false;
++
++   const struct pipe_rt_blend_state *rt = &blend->rt[0];
++   /* No color-mask register is emitted by this driver. */
++   if (rt->colormask != PIPE_MASK_RGBA)
++      return false;
++
++   if (!rt->blend_enable)
++      return true;
++
++   /* The blend function matters: REVERSE_SUBTRACT with ONE/ZERO is -src. */
++   return rt->rgb_func == PIPE_BLEND_ADD &&
++          rt->alpha_func == PIPE_BLEND_ADD &&
++          rt->rgb_src_factor == PIPE_BLENDFACTOR_ONE &&
++          rt->alpha_src_factor == PIPE_BLENDFACTOR_ONE &&
++          rt->rgb_dst_factor == PIPE_BLENDFACTOR_ZERO &&
++          rt->alpha_dst_factor == PIPE_BLENDFACTOR_ZERO;
++}
++
++static bool
+ grate_blend_is_premultiplied_src_over(const struct pipe_blend_state *blend)
+ {
+    const struct pipe_rt_blend_state *rt;
+@@ -285,20 +310,60 @@
+           rt->colormask == PIPE_MASK_RGBA;
+ }
+ 
++static bool
++grate_blend_is_standard_alpha(const struct pipe_blend_state *blend)
++{
++   if (!blend || blend->logicop_enable || blend->independent_blend_enable)
++      return false;
++
++   const struct pipe_rt_blend_state *rt = &blend->rt[0];
++   if (!rt->blend_enable || rt->colormask != PIPE_MASK_RGBA ||
++       rt->rgb_func != PIPE_BLEND_ADD || rt->alpha_func != PIPE_BLEND_ADD)
++      return false;
++
++   return rt->rgb_src_factor == PIPE_BLENDFACTOR_SRC_ALPHA &&
++          rt->alpha_src_factor == PIPE_BLENDFACTOR_SRC_ALPHA &&
++          rt->rgb_dst_factor == PIPE_BLENDFACTOR_INV_SRC_ALPHA &&
++          rt->alpha_dst_factor == PIPE_BLENDFACTOR_INV_SRC_ALPHA;
++}
++
++static bool
++grate_blend_is_additive(const struct pipe_blend_state *blend)
++{
++   if (!blend || blend->logicop_enable || blend->independent_blend_enable)
++      return false;
++
++   const struct pipe_rt_blend_state *rt = &blend->rt[0];
++   if (!rt->blend_enable || rt->colormask != PIPE_MASK_RGBA ||
++       rt->rgb_func != PIPE_BLEND_ADD || rt->alpha_func != PIPE_BLEND_ADD)
++      return false;
++
++   return rt->rgb_src_factor == PIPE_BLENDFACTOR_ONE &&
++          rt->alpha_src_factor == PIPE_BLENDFACTOR_ONE &&
++          rt->rgb_dst_factor == PIPE_BLENDFACTOR_ONE &&
++          rt->alpha_dst_factor == PIPE_BLENDFACTOR_ONE;
++}
++
+ static void
+ grate_bind_blend_state(struct pipe_context *pcontext, void *so)
+ {
+    struct grate_context *context = grate_context(pcontext);
+    const struct pipe_blend_state *blend = so;
++   bool disabled;
+ 
+    context->blend = so;
+-   context->blend_src_over = grate_blend_is_premultiplied_src_over(blend);
+-   context->blend_unsupported = blend && blend->rt[0].blend_enable &&
+-                                !context->blend_src_over;
++   disabled = grate_blend_is_disabled_or_replace(blend);
++   context->blend_src_over =
++      grate_blend_is_premultiplied_src_over(blend);
++   context->blend_standard_alpha = grate_blend_is_standard_alpha(blend);
++   context->blend_additive = grate_blend_is_additive(blend);
++   context->blend_unsupported = !disabled && !context->blend_src_over &&
++                                !context->blend_standard_alpha &&
++                                !context->blend_additive;
+ 
+    if (context->blend_unsupported && (grate_debug & GRATE_DEBUG_UNIMPLEMENTED))
+       fprintf(stderr,
+-              "grate: unsupported blend state; only premultiplied source-over is accelerated\n");
++              "grate: unsupported blend state (mode, mask, or logic operation)\n");
+ }
+ 
+ static void
+@@ -1027,10 +1092,19 @@
+ 
+    emit_shader(stream, &context->vshader->blob);
+ 
+-   const bool source_over =
+-      context->blend_src_over && context->fshader->src_over_valid;
+-   emit_shader(stream, source_over ? &context->fshader->src_over_blob
+-                                   : &context->fshader->blob);
++   struct grate_shader_blob *blob = &context->fshader->blob;
++   struct grate_fp_info *info = &context->fshader->info;
++   if (context->blend_src_over) {
++      blob = &context->fshader->src_over_blob;
++      info = &context->fshader->src_over_info;
++   } else if (context->blend_standard_alpha) {
++      blob = &context->fshader->standard_alpha_blob;
++      info = &context->fshader->standard_alpha_info;
++   } else if (context->blend_additive) {
++      blob = &context->fshader->additive_blob;
++      info = &context->fshader->additive_info;
++   }
++   emit_shader(stream, blob);
+ 
+    uint32_t cull_face_linker_setup = TGR3D_VAL(CULL_FACE_LINKER_SETUP,
+                                                UNK_18_31, 0x2e38);
+@@ -1039,8 +1113,6 @@
+    cull_face_linker_setup |= context->rast->cull_face[context->y_invert];
+ 
+    /* depends on linking */
+-   struct grate_fp_info *info =
+-      source_over ? &context->fshader->src_over_info : &context->fshader->info;
+    unsigned num_linker_inputs = MAX2(info->num_inputs, 1);
+    cull_face_linker_setup |= TGR3D_VAL(CULL_FACE_LINKER_SETUP,
+                                        LINKER_INST_COUNT,
