@@ -1,0 +1,75 @@
+From: SL101 Grate bring-up <sl101@localhost>
+Subject: [PATCH] grate: expand VP scalar TGSI lowering
+
+Expose Tegra20 scalar RCP, EXP, LOG, LIT, LG2, EX2, SIN, and COS
+through the existing single-source scalar + vector-NOP emission path.
+
+---
+ src/gallium/drivers/grate/vp/tgsi.c | 48 +++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 48 insertions(+)
+
+diff --git a/src/gallium/drivers/grate/vp/tgsi.c b/src/gallium/drivers/grate/vp/tgsi.c
+--- a/src/gallium/drivers/grate/vp/tgsi.c
++++ b/src/gallium/drivers/grate/vp/tgsi.c
+@@ -214,6 +214,14 @@
+ }
+ 
+ GEN_S_UNOP(RSQ)
++GEN_S_UNOP(RCP)
++GEN_S_UNOP(EXP)
++GEN_S_UNOP(LOG)
++GEN_S_UNOP(LIT)
++GEN_S_UNOP(LG2)
++GEN_S_UNOP(EX2)
++GEN_S_UNOP(SIN)
++GEN_S_UNOP(COS)
+ 
+ static struct vp_instr *
+ emit_packed(struct vp_vec_instr vec, struct vp_scalar_instr scalar)
+@@ -413,6 +421,46 @@
+    case TGSI_OPCODE_RSQ:
+       return emit_packed(emit_vNOP(),
+                          emit_sRSQ(tgsi_dst_to_vp(vp, &inst->Dst[0].Register, saturate),
++                                   tgsi_src_to_vp(vp, &inst->Src[0].Register)));
++
++   case TGSI_OPCODE_RCP:
++      return emit_packed(emit_vNOP(),
++                         emit_sRCP(tgsi_dst_to_vp(vp, &inst->Dst[0].Register, saturate),
++                                   tgsi_src_to_vp(vp, &inst->Src[0].Register)));
++
++   case TGSI_OPCODE_EXP:
++      return emit_packed(emit_vNOP(),
++                         emit_sEXP(tgsi_dst_to_vp(vp, &inst->Dst[0].Register, saturate),
++                                   tgsi_src_to_vp(vp, &inst->Src[0].Register)));
++
++   case TGSI_OPCODE_LOG:
++      return emit_packed(emit_vNOP(),
++                         emit_sLOG(tgsi_dst_to_vp(vp, &inst->Dst[0].Register, saturate),
++                                   tgsi_src_to_vp(vp, &inst->Src[0].Register)));
++
++   case TGSI_OPCODE_LIT:
++      return emit_packed(emit_vNOP(),
++                         emit_sLIT(tgsi_dst_to_vp(vp, &inst->Dst[0].Register, saturate),
++                                   tgsi_src_to_vp(vp, &inst->Src[0].Register)));
++
++   case TGSI_OPCODE_LG2:
++      return emit_packed(emit_vNOP(),
++                         emit_sLG2(tgsi_dst_to_vp(vp, &inst->Dst[0].Register, saturate),
++                                   tgsi_src_to_vp(vp, &inst->Src[0].Register)));
++
++   case TGSI_OPCODE_EX2:
++      return emit_packed(emit_vNOP(),
++                         emit_sEX2(tgsi_dst_to_vp(vp, &inst->Dst[0].Register, saturate),
++                                   tgsi_src_to_vp(vp, &inst->Src[0].Register)));
++
++   case TGSI_OPCODE_SIN:
++      return emit_packed(emit_vNOP(),
++                         emit_sSIN(tgsi_dst_to_vp(vp, &inst->Dst[0].Register, saturate),
++                                   tgsi_src_to_vp(vp, &inst->Src[0].Register)));
++
++   case TGSI_OPCODE_COS:
++      return emit_packed(emit_vNOP(),
++                         emit_sCOS(tgsi_dst_to_vp(vp, &inst->Dst[0].Register, saturate),
+                                    tgsi_src_to_vp(vp, &inst->Src[0].Register)));
+ 
+    default:
