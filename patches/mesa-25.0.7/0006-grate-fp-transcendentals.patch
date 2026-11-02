@@ -1,0 +1,312 @@
+From: SL101 Tegra20 <sl101@localhost>
+Subject: [PATCH] grate: lower fragment SFU transcendental TGSI opcodes
+
+Add LG2/SQRT and PREEX2/EX2, PRESIN/SIN, PRECOS/COS fragment
+execution with scalar GPR source materialization and saturation.
+
+---
+--- a/src/gallium/drivers/grate/fp/tgsi.c
++++ b/src/gallium/drivers/grate/fp/tgsi.c
+@@ -23,6 +23,7 @@
+ };
+ 
+ struct fp_lowering_state {
++   unsigned declared_temps;
+    struct fp_temp_alias temp_alias[FP_GPR_COUNT];
+    struct fp_pending_tex pending_tex[FP_GPR_COUNT / 4];
+ };
+@@ -274,12 +275,18 @@
+        * only simple MOV aliases back to their original scalar source so MFU
+        * interpolation and ALU consumption happen in the same EXEC.
+        */
+-      if (!src->Negate && !src->Absolute &&
+-          lowering->temp_alias[scalar].valid) {
++      if (lowering->temp_alias[scalar].valid) {
+          const struct fp_temp_alias *alias = &lowering->temp_alias[scalar];
+-         return fp_src_component(fp, lowering, packet, mfu, varying_rows,
+-                                 &alias->src, alias->component,
+-                                 out, uses_mfu, tex_temp_index);
++         if (!fp_src_component(fp, lowering, packet, mfu, varying_rows,
++                               &alias->src, alias->component,
++                               out, uses_mfu, tex_temp_index))
++            return false;
++         /* Aliases are created only from unmodified MOV sources. Apply the
++          * current consumer's modifiers to the resolved physical operand.
++          */
++         out->negate = src->Negate;
++         out->absolute_value = src->Absolute;
++         return true;
+       }
+ 
+       if (src->Index < FP_GPR_COUNT / 4) {
+@@ -527,7 +534,8 @@
+ static bool
+ fp_emit_alu(struct grate_fp_shader *fp,
+             struct fp_lowering_state *lowering,
+-            const struct tgsi_full_instruction *tgsi_inst)
++            const struct tgsi_full_instruction *tgsi_inst,
++            bool force_mov)
+ {
+    const struct tgsi_dst_register *dst = &tgsi_inst->Dst[0].Register;
+    bool saturate = tgsi_inst->Instruction.Saturate != 0;
+@@ -542,7 +550,7 @@
+    if (num_components == 0)
+       return true;
+ 
+-   if (dst->File == TGSI_FILE_TEMPORARY) {
++   if (dst->File == TGSI_FILE_TEMPORARY && !force_mov) {
+       const struct tgsi_src_register *src0 =
+          tgsi_inst->Instruction.NumSrcRegs == 1 ?
+          &tgsi_inst->Src[0].Register : NULL;
+@@ -789,8 +797,204 @@
+       return false;
+    }
+ 
++   if (force_mov && dst->File == TGSI_FILE_TEMPORARY) {
++      for (unsigned c = 0; c < 4; ++c) {
++         if (!(dst->WriteMask & (1u << c)))
++            continue;
++         unsigned scalar = dst->Index * 4 + c;
++         lowering->temp_alias[scalar].valid = false;
++         struct fp_pending_tex *pending = &lowering->pending_tex[dst->Index];
++         pending->component_mask &= ~(1u << c);
++         if (!pending->component_mask)
++            pending->valid = false;
++      }
++   }
+    return true;
+ }
++
++/* SFU instructions read physical scalar GPRs, not row/uniform operands. */
++static bool
++fp_sfu_source_gpr(struct grate_fp_shader *fp,
++                  struct fp_lowering_state *lowering,
++                  const struct tgsi_full_instruction *tgsi_inst,
++                  unsigned *gpr)
++{
++   const struct tgsi_src_register *src = &tgsi_inst->Src[0].Register;
++   const struct tgsi_dst_register *dst = &tgsi_inst->Dst[0].Register;
++   unsigned swizzle = fp_src_swizzle(src, 0);
++   if (swizzle >= 4)
++      return fp_fail(fp, "invalid fragment SFU source swizzle %u", swizzle);
++
++   if (src->File == TGSI_FILE_TEMPORARY) {
++      unsigned scalar = src->Index * 4 + swizzle;
++      if (scalar >= FP_GPR_COUNT)
++         return fp_fail(fp, "fragment SFU TEMP[%u].%u exceeds GPR range",
++                        src->Index, swizzle);
++      bool pending = src->Index < FP_GPR_COUNT / 4 &&
++                     lowering->pending_tex[src->Index].valid &&
++                     (lowering->pending_tex[src->Index].component_mask &
++                      (1u << swizzle));
++      if (!src->Negate && !src->Absolute &&
++          !lowering->temp_alias[scalar].valid && !pending) {
++         *gpr = scalar;
++         return true;
++      }
++   }
++
++   /*
++    * A writable TEMP scalar is safe staging storage (it is overwritten by
++    * this opcode). For OUTPUT, only use an undeclared TEMP register: silently
++    * taking a live GPR would corrupt later instructions.
++    */
++   unsigned scratch = FP_GPR_COUNT;
++   if (dst->File == TGSI_FILE_TEMPORARY) {
++      for (unsigned c = 0; c < 4; ++c)
++         if (dst->WriteMask & (1u << c)) {
++            scratch = dst->Index * 4 + c;
++            break;
++         }
++   } else if (dst->File == TGSI_FILE_OUTPUT) {
++      scratch = lowering->declared_temps * 4;
++   }
++   if (scratch >= FP_GPR_COUNT)
++      return fp_fail(fp, "fragment SFU needs a free scalar staging GPR");
++
++   /* Force a genuine MOV EXEC, bypassing the normal TEMP alias fast path. */
++   struct tgsi_full_instruction mov = *tgsi_inst;
++   mov.Instruction.Opcode = TGSI_OPCODE_MOV;
++   mov.Instruction.NumSrcRegs = 1;
++   mov.Instruction.Saturate = 0;
++   mov.Dst[0].Register.File = TGSI_FILE_TEMPORARY;
++   mov.Dst[0].Register.Index = scratch / 4;
++   mov.Dst[0].Register.WriteMask = 1u << (scratch % 4);
++   /* Scalar SFU instructions always sample the TGSI source's X swizzle. */
++   mov.Src[0].Register.SwizzleX = swizzle;
++   mov.Src[0].Register.SwizzleY = swizzle;
++   mov.Src[0].Register.SwizzleZ = swizzle;
++   mov.Src[0].Register.SwizzleW = swizzle;
++   if (!fp_emit_alu(fp, lowering, &mov, true))
++      return false;
++   *gpr = scratch;
++   return true;
++}
++
++static bool
++fp_emit_sfu(struct grate_fp_shader *fp,
++            struct fp_lowering_state *lowering,
++            const struct tgsi_full_instruction *tgsi_inst,
++            enum fp_sfu_op pre_op, enum fp_sfu_op result_op)
++{
++   const struct tgsi_dst_register *dst = &tgsi_inst->Dst[0].Register;
++   const bool saturate = tgsi_inst->Instruction.Saturate != 0;
++   const unsigned steps = pre_op == FP_SFU_OP_NOP ? 1 : 2;
++   struct fp_instr *exec[2] = {NULL, NULL};
++   struct fp_mfu_instr *mfu[2] = {NULL, NULL};
++   struct fp_alu_instr_packet *alu[2] = {NULL, NULL};
++   unsigned source_gpr;
++
++   if (!dst->WriteMask)
++      return true;
++   if (tgsi_inst->Instruction.NumSrcRegs != 1)
++      return fp_fail(fp, "fragment SFU expects exactly one source");
++   if (!fp_sfu_source_gpr(fp, lowering, tgsi_inst, &source_gpr))
++      return false;
++   if (list_length(&fp->fp_instructions) + steps > 63 ||
++       list_length(&fp->mfu_instructions) + steps > 63 ||
++       list_length(&fp->alu_instructions) + steps > 63)
++      return fp_fail(fp, "fragment SFU exceeds 63-slot scheduling limits");
++
++   const unsigned mfu_base = list_length(&fp->mfu_instructions);
++   const unsigned alu_base = list_length(&fp->alu_instructions);
++   const unsigned last_exec = list_length(&fp->fp_instructions) + steps;
++   for (unsigned i = 0; i < steps; ++i) {
++      exec[i] = CALLOC_STRUCT(fp_instr);
++      mfu[i] = CALLOC_STRUCT(fp_mfu_instr);
++      alu[i] = CALLOC_STRUCT(fp_alu_instr_packet);
++      if (!exec[i] || !mfu[i] || !alu[i]) {
++         fp_fail(fp, "out of memory lowering fragment SFU");
++         goto fail;
++      }
++      list_inithead(&exec[i]->link);
++      list_inithead(&mfu[i]->link);
++      list_inithead(&alu[i]->link);
++      mfu[i]->sfu.op = (i == 0 && steps == 2) ? pre_op : result_op;
++      mfu[i]->sfu.reg = i == 0 ? source_gpr : 0;
++      mfu[i]->mul[0].dst = FP_MFU_MUL_DST_ROW_REG_0;
++      mfu[i]->mul[0].src[0] = FP_MFU_MUL_SRC_SFU_RESULT;
++      mfu[i]->mul[0].src[1] = FP_MFU_MUL_SRC_CONST_1;
++      exec[i]->mfu_sched.address = mfu_base + i;
++      exec[i]->mfu_sched.num_instructions = 1;
++      exec[i]->alu_sched.address = alu_base + i;
++      exec[i]->alu_sched.num_instructions = 1;
++   }
++
++   /* The PRE* stage emits a no-write ALU packet; the final stage fans out
++    * one scalar SFU result to all written components in one EXEC. This also
++    * prevents in-place TEMP writes from clobbering the source mid-operation.
++    */
++   unsigned slot = 0;
++   for (unsigned c = 0; c < 4; ++c) {
++      if (!(dst->WriteMask & (1u << c)))
++         continue;
++      struct fp_alu_dst_operand d;
++      if (!fp_dst_component(fp, dst, c, saturate, &d))
++         goto fail;
++      alu[steps - 1]->slots[slot++] = fp_make_mov(d, fp_src_row(0));
++   }
++   if (dst->File == TGSI_FILE_OUTPUT) {
++      exec[steps - 1]->dw.enable = true;
++      exec[steps - 1]->dw.index = 1 + dst->Index;
++      exec[steps - 1]->dw.src_regs = FP_DW_REGS_R2_R3;
++      if (last_exec > fp->info.pseq_to_dw_exec_nb)
++         fp->info.pseq_to_dw_exec_nb = last_exec;
++   }
++
++   for (unsigned i = 0; i < steps; ++i) {
++      list_addtail(&mfu[i]->link, &fp->mfu_instructions);
++      list_addtail(&alu[i]->link, &fp->alu_instructions);
++      list_addtail(&exec[i]->link, &fp->fp_instructions);
++   }
++   if (dst->File == TGSI_FILE_TEMPORARY) {
++      for (unsigned c = 0; c < 4; ++c) {
++         if (!(dst->WriteMask & (1u << c)))
++            continue;
++         unsigned scalar = dst->Index * 4 + c;
++         lowering->temp_alias[scalar].valid = false;
++         struct fp_pending_tex *pending = &lowering->pending_tex[dst->Index];
++         pending->component_mask &= ~(1u << c);
++         if (!pending->component_mask)
++            pending->valid = false;
++      }
++   }
++   return true;
++
++fail:
++   for (unsigned i = 0; i < steps; ++i) {
++      FREE(exec[i]);
++      FREE(mfu[i]);
++      FREE(alu[i]);
++   }
++   return false;
++}
++
++static bool
++fp_emit_sfu_direct(struct grate_fp_shader *fp,
++                   struct fp_lowering_state *lowering,
++                   const struct tgsi_full_instruction *tgsi_inst,
++                   enum fp_sfu_op op)
++{
++   return fp_emit_sfu(fp, lowering, tgsi_inst, FP_SFU_OP_NOP, op);
++}
++
++static bool
++fp_emit_sfu_twostage(struct grate_fp_shader *fp,
++                     struct fp_lowering_state *lowering,
++                     const struct tgsi_full_instruction *tgsi_inst,
++                     enum fp_sfu_op pre_op, enum fp_sfu_op op)
++{
++   return fp_emit_sfu(fp, lowering, tgsi_inst, pre_op, op);
++}
++
+ 
+ static bool
+ fp_emit_tex(struct grate_fp_shader *fp,
+@@ -1004,6 +1208,11 @@
+       tgsi_parse_token(tgsi);
+       switch (tgsi->FullToken.Token.Type) {
+       case TGSI_TOKEN_TYPE_DECLARATION:
++         if (tgsi->FullToken.FullDeclaration.Declaration.File == TGSI_FILE_TEMPORARY) {
++            unsigned count = tgsi->FullToken.FullDeclaration.Range.Last + 1;
++            if (count > lowering.declared_temps)
++               lowering.declared_temps = count;
++         }
+          fp_emit_declaration(fp, &tgsi->FullToken.FullDeclaration);
+          break;
+ 
+@@ -1014,8 +1223,32 @@
+       case TGSI_TOKEN_TYPE_INSTRUCTION:
+          if (tgsi->FullToken.FullInstruction.Instruction.Opcode == TGSI_OPCODE_TEX)
+             fp_emit_tex(fp, &lowering, &tgsi->FullToken.FullInstruction);
+-         else if (tgsi->FullToken.FullInstruction.Instruction.Opcode != TGSI_OPCODE_END)
+-            fp_emit_alu(fp, &lowering, &tgsi->FullToken.FullInstruction);
++         else if (tgsi->FullToken.FullInstruction.Instruction.Opcode != TGSI_OPCODE_END) {
++            const struct tgsi_full_instruction *inst = &tgsi->FullToken.FullInstruction;
++            switch (inst->Instruction.Opcode) {
++            case TGSI_OPCODE_LG2:
++               fp_emit_sfu_direct(fp, &lowering, inst, FP_SFU_OP_LG2);
++               break;
++            case TGSI_OPCODE_SQRT:
++               fp_emit_sfu_direct(fp, &lowering, inst, FP_SFU_OP_SQRT);
++               break;
++            case TGSI_OPCODE_EX2:
++               fp_emit_sfu_twostage(fp, &lowering, inst,
++                                    FP_SFU_OP_PREEX2, FP_SFU_OP_EX2);
++               break;
++            case TGSI_OPCODE_SIN:
++               fp_emit_sfu_twostage(fp, &lowering, inst,
++                                    FP_SFU_OP_PRESIN, FP_SFU_OP_SIN);
++               break;
++            case TGSI_OPCODE_COS:
++               fp_emit_sfu_twostage(fp, &lowering, inst,
++                                    FP_SFU_OP_PRECOS, FP_SFU_OP_COS);
++               break;
++            default:
++               fp_emit_alu(fp, &lowering, inst, false);
++               break;
++            }
++         }
+          break;
+       }
+    }
