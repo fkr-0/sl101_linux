@@ -1,0 +1,372 @@
+--- a/src/gallium/drivers/grate/fp/tgsi.c
++++ b/src/gallium/drivers/grate/fp/tgsi.c
+@@ -1024,6 +1024,353 @@
+ }
+ 
+ 
++/*
++ * DP3/DP4 are scalar operations on T20.  Only TEMP[0..1] exist, so an
++ * accumulator must be a destination scalar that this dot does not read, or
++ * a GPR belonging to an entirely undeclared temporary.  We must not borrow
++ * an arbitrary GPR: another shader value could be live there.
++ */
++static bool
++fp_dot_scratch(struct grate_fp_shader *fp,
++               const struct fp_lowering_state *lowering,
++               const struct tgsi_full_instruction *tgsi_inst,
++               unsigned dimensions, unsigned *scratch)
++{
++   const struct tgsi_dst_register *dst = &tgsi_inst->Dst[0].Register;
++   unsigned source_mask = 0;
++
++   for (unsigned s = 0; s < 2; ++s) {
++      const struct tgsi_src_register *src = &tgsi_inst->Src[s].Register;
++      if (src->File != TGSI_FILE_TEMPORARY)
++         continue;
++
++      for (unsigned c = 0; c < dimensions; ++c) {
++         unsigned scalar = src->Index * 4 + fp_src_swizzle(src, c);
++         if (scalar >= FP_GPR_COUNT)
++            return fp_fail(fp, "DP source exceeds %u scalar FP GPRs", FP_GPR_COUNT);
++         source_mask |= 1u << scalar;
++      }
++   }
++
++   if (dst->File == TGSI_FILE_TEMPORARY) {
++      for (unsigned c = 0; c < 4; ++c) {
++         unsigned scalar = dst->Index * 4 + c;
++         if ((dst->WriteMask & (1u << c)) &&
++             scalar < FP_GPR_COUNT && !(source_mask & (1u << scalar))) {
++            *scratch = scalar;
++            return true;
++         }
++      }
++   }
++
++   for (unsigned scalar = 0; scalar < FP_GPR_COUNT; ++scalar) {
++      if (scalar >= lowering->declared_temps * 4 &&
++          !(source_mask & (1u << scalar))) {
++         *scratch = scalar;
++         return true;
++      }
++   }
++
++   return fp_fail(fp, "DP%u needs a scratch FP20 GPR; all 8 scalars are live",
++                  dimensions);
++}
++
++static void
++fp_set_src_swizzle(struct tgsi_src_register *src, unsigned component)
++{
++   src->SwizzleX = component;
++   src->SwizzleY = component;
++   src->SwizzleZ = component;
++   src->SwizzleW = component;
++}
++
++static struct tgsi_src_register
++fp_scratch_src(unsigned scalar)
++{
++   struct tgsi_src_register src = {0};
++   src.File = TGSI_FILE_TEMPORARY;
++   src.Index = scalar / 4;
++   fp_set_src_swizzle(&src, scalar % 4);
++   return src;
++}
++
++static struct tgsi_dst_register
++fp_scratch_dst(unsigned scalar)
++{
++   struct tgsi_dst_register dst = {0};
++   dst.File = TGSI_FILE_TEMPORARY;
++   dst.Index = scalar / 4;
++   dst.WriteMask = 1u << (scalar % 4);
++   return dst;
++}
++
++static bool
++fp_emit_dot(struct grate_fp_shader *fp,
++            struct fp_lowering_state *lowering,
++            const struct tgsi_full_instruction *tgsi_inst,
++            unsigned dimensions)
++{
++   const struct tgsi_dst_register *dst = &tgsi_inst->Dst[0].Register;
++   unsigned scratch;
++   struct tgsi_full_instruction op = {0};
++
++   if (tgsi_inst->Instruction.NumSrcRegs != 2 ||
++       tgsi_inst->Instruction.NumDstRegs != 1)
++      return fp_fail(fp, "DP%u requires two sources and one destination", dimensions);
++   if (!dst->WriteMask)
++      return true;
++   if (!fp_dot_scratch(fp, lowering, tgsi_inst, dimensions, &scratch))
++      return false;
++
++   op.Instruction.NumDstRegs = 1;
++   op.Instruction.NumSrcRegs = 2;
++   op.Dst[0].Register = fp_scratch_dst(scratch);
++
++   /*
++    * A dot source consumes x/y/z[/w] in sequence, irrespective of the
++    * destination writemask.  Repeating each term's effective swizzle in
++    * every source channel lets the regular scalar emitter handle modifiers,
++    * uniforms, immediates, interpolation, TEX aliases and packet allocation.
++    */
++   for (unsigned c = 0; c < dimensions; ++c) {
++      op.Instruction.Opcode = c == 0 ? TGSI_OPCODE_MUL : TGSI_OPCODE_MAD;
++      op.Instruction.NumSrcRegs = c == 0 ? 2 : 3;
++      op.Dst[0].Register = fp_scratch_dst(scratch);
++      op.Instruction.Saturate = 0;
++
++      for (unsigned s = 0; s < 2; ++s) {
++         op.Src[s].Register = tgsi_inst->Src[s].Register;
++         fp_set_src_swizzle(&op.Src[s].Register,
++                            fp_src_swizzle(&tgsi_inst->Src[s].Register, c));
++      }
++      if (c)
++         op.Src[2].Register = fp_scratch_src(scratch);
++
++      /*
++       * The common case writes the replicated result in this final MAD:
++       * DP3 uses three EXECs, DP4 four.  A separate broadcast is necessary
++       * if embedded constants force scalar splitting or a TEMP destination
++       * aliases a dot source (which could invalidate virtual MOV aliases).
++       */
++      bool direct_final = c + 1 == dimensions;
++      if (direct_final && dst->File == TGSI_FILE_TEMPORARY) {
++         for (unsigned s = 0; s < 2; ++s) {
++            if (tgsi_inst->Src[s].Register.File == TGSI_FILE_TEMPORARY &&
++                tgsi_inst->Src[s].Register.Index == dst->Index)
++               direct_final = false;
++         }
++      }
++      if (direct_final) {
++         op.Dst[0].Register = *dst;
++         op.Instruction.Saturate = tgsi_inst->Instruction.Saturate;
++         if (fp_instruction_uses_embedded(fp, &op))
++            direct_final = false;
++      }
++      if (!direct_final) {
++         op.Dst[0].Register = fp_scratch_dst(scratch);
++         op.Instruction.Saturate = 0;
++      }
++      if (!fp_emit_alu(fp, lowering, &op, false))
++         return false;
++      if (direct_final)
++         return true;
++   }
++
++   op = (struct tgsi_full_instruction) {0};
++   op.Instruction.Opcode = TGSI_OPCODE_MOV;
++   op.Instruction.NumDstRegs = 1;
++   op.Instruction.NumSrcRegs = 1;
++   op.Instruction.Saturate = tgsi_inst->Instruction.Saturate;
++   op.Dst[0].Register = *dst;
++   op.Src[0].Register = fp_scratch_src(scratch);
++
++   /* Replicate from the stable FP20 scratch when direct final MAD was unsafe. */
++   return fp_emit_alu(fp, lowering, &op, false);
++}
++
++static bool
++fp_emit_dp3(struct grate_fp_shader *fp,
++            struct fp_lowering_state *lowering,
++            const struct tgsi_full_instruction *tgsi_inst)
++{
++   return fp_emit_dot(fp, lowering, tgsi_inst, 3);
++}
++
++static bool
++fp_emit_dp4(struct grate_fp_shader *fp,
++            struct fp_lowering_state *lowering,
++            const struct tgsi_full_instruction *tgsi_inst)
++{
++   return fp_emit_dot(fp, lowering, tgsi_inst, 4);
++}
++
++/*
++ * SFU inputs are physical registers; a folded MOV alias, deferred TEX, input,
++ * uniform or immediate is not a physical TEMP even if its TGSI file says so.
++ */
++static bool
++fp_emit_frc(struct grate_fp_shader *fp,
++            struct fp_lowering_state *lowering,
++            const struct tgsi_full_instruction *tgsi_inst)
++{
++   const struct tgsi_dst_register *dst = &tgsi_inst->Dst[0].Register;
++   const struct tgsi_src_register *src = &tgsi_inst->Src[0].Register;
++   const bool saturate = tgsi_inst->Instruction.Saturate != 0;
++   const unsigned mask = dst->WriteMask;
++   unsigned source_mask = 0;
++
++   if (tgsi_inst->Instruction.NumSrcRegs != 1 ||
++       tgsi_inst->Instruction.NumDstRegs != 1)
++      return fp_fail(fp, "FRC requires one source and one destination");
++
++   /* Reserve all source TEMP scalars before any output is written. */
++   if (src->File == TGSI_FILE_TEMPORARY) {
++      for (unsigned c = 0; c < 4; ++c) {
++         if (!(mask & (1u << c)))
++            continue;
++         unsigned scalar = src->Index * 4 + fp_src_swizzle(src, c);
++         if (scalar >= FP_GPR_COUNT)
++            return fp_fail(fp, "FRC source TEMP[%u] exceeds FP GPRs", src->Index);
++         source_mask |= 1u << scalar;
++      }
++
++      /*
++       * In-place swizzle permutations require a second vec4 or a true
++       * parallel copy.  Never overwrite a source channel needed later.
++       */
++      if (dst->File == TGSI_FILE_TEMPORARY &&
++          dst->Index == src->Index) {
++         unsigned written = 0;
++         for (unsigned c = 0; c < 4; ++c) {
++            if (!(mask & (1u << c)))
++               continue;
++            if (written & (1u << fp_src_swizzle(src, c)))
++               return fp_fail(fp, "FRC in-place swizzle overwrites a later source");
++            written |= 1u << c;
++         }
++      }
++   }
++
++   for (unsigned c = 0; c < 4; ++c) {
++      if (!(mask & (1u << c)))
++         continue;
++
++      unsigned reg = 0;
++      bool direct_gpr = src->File == TGSI_FILE_TEMPORARY &&
++                        !src->Negate && !src->Absolute;
++      if (direct_gpr) {
++         reg = src->Index * 4 + fp_src_swizzle(src, c);
++         if (lowering->temp_alias[reg].valid ||
++             (src->Index < FP_GPR_COUNT / 4 &&
++              lowering->pending_tex[src->Index].valid &&
++              (lowering->pending_tex[src->Index].component_mask &
++               (1u << fp_src_swizzle(src, c)))))
++            direct_gpr = false;
++      }
++
++      if (!direct_gpr) {
++         bool have_reg = false;
++         /* Reuse the scalar we are already going to overwrite, if safe. */
++         if (dst->File == TGSI_FILE_TEMPORARY) {
++            unsigned candidate = dst->Index * 4 + c;
++            if (candidate < FP_GPR_COUNT &&
++                !(source_mask & (1u << candidate))) {
++               reg = candidate;
++               have_reg = true;
++            }
++         }
++         if (!have_reg) {
++            for (unsigned candidate = 0; candidate < FP_GPR_COUNT; ++candidate) {
++               if (candidate >= lowering->declared_temps * 4 &&
++                   !(source_mask & (1u << candidate))) {
++                  reg = candidate;
++                  have_reg = true;
++                  break;
++               }
++            }
++         }
++         if (!have_reg)
++            return fp_fail(fp, "FRC source requires a free physical FP GPR");
++
++         struct tgsi_full_instruction mov = {0};
++         mov.Instruction.Opcode = TGSI_OPCODE_MOV;
++         mov.Instruction.NumDstRegs = 1;
++         mov.Instruction.NumSrcRegs = 1;
++         mov.Dst[0].Register = fp_scratch_dst(reg);
++         mov.Src[0].Register = *src;
++         fp_set_src_swizzle(&mov.Src[0].Register, fp_src_swizzle(src, c));
++
++         /* Force actual ALU materialization instead of a virtual MOV alias. */
++         if (!fp_emit_alu(fp, lowering, &mov, true))
++            return false;
++      }
++
++      if (list_length(&fp->fp_instructions) >= 63 ||
++          list_length(&fp->mfu_instructions) >= 63 ||
++          list_length(&fp->alu_instructions) >= 63)
++         return fp_fail(fp, "fragment FRC exceeds 63-slot scheduling limits");
++
++      struct fp_instr *inst = CALLOC_STRUCT(fp_instr);
++      struct fp_mfu_instr *mfu = CALLOC_STRUCT(fp_mfu_instr);
++      struct fp_alu_instr_packet *alu = CALLOC_STRUCT(fp_alu_instr_packet);
++      if (!inst || !mfu || !alu) {
++         FREE(inst);
++         FREE(mfu);
++         FREE(alu);
++         return fp_fail(fp, "out of memory lowering FRC");
++      }
++      list_inithead(&inst->link);
++      list_inithead(&mfu->link);
++      list_inithead(&alu->link);
++
++      struct fp_alu_dst_operand d;
++      if (!fp_dst_component(fp, dst, c, saturate, &d)) {
++         FREE(inst);
++         FREE(mfu);
++         FREE(alu);
++         return false;
++      }
++
++      mfu->sfu.op = FP_SFU_OP_FRC;
++      mfu->sfu.reg = reg;
++      mfu->mul[0].dst = FP_MFU_MUL_DST_ROW_REG_0;
++      mfu->mul[0].src[0] = FP_MFU_MUL_SRC_SFU_RESULT;
++      mfu->mul[0].src[1] = FP_MFU_MUL_SRC_CONST_1;
++      alu->slots[0] = fp_make_mov(d, fp_src_row(0));
++
++      inst->mfu_sched.num_instructions = 1;
++      inst->mfu_sched.address = list_length(&fp->mfu_instructions);
++      inst->alu_sched.num_instructions = 1;
++      inst->alu_sched.address = list_length(&fp->alu_instructions);
++
++      /* DW must run only after the last component has been written. */
++      if (dst->File == TGSI_FILE_OUTPUT &&
++          !(mask & ~((1u << (c + 1)) - 1))) {
++         inst->dw.enable = true;
++         inst->dw.index = 1 + dst->Index;
++         inst->dw.stencil_write = false;
++         inst->dw.src_regs = FP_DW_REGS_R2_R3;
++         fp_note_dw_exec(fp);
++      }
++
++      list_addtail(&mfu->link, &fp->mfu_instructions);
++      list_addtail(&alu->link, &fp->alu_instructions);
++      list_addtail(&inst->link, &fp->fp_instructions);
++
++      if (dst->File == TGSI_FILE_TEMPORARY) {
++         unsigned scalar = dst->Index * 4 + c;
++         lowering->temp_alias[scalar].valid = false;
++         struct fp_pending_tex *pending = &lowering->pending_tex[dst->Index];
++         pending->component_mask &= ~(1u << c);
++         if (!pending->component_mask)
++            pending->valid = false;
++      }
++   }
++
++   return true;
++}
++
++
+ static bool
+ fp_emit_tex(struct grate_fp_shader *fp,
+             struct fp_lowering_state *lowering,
+@@ -1260,6 +1607,15 @@
+             case TGSI_OPCODE_RSQ:
+                fp_emit_sfu_direct(fp, &lowering, inst, FP_SFU_OP_RSQ);
+                break;
++            case TGSI_OPCODE_FRC:
++               fp_emit_frc(fp, &lowering, inst);
++               break;
++            case TGSI_OPCODE_DP3:
++               fp_emit_dp3(fp, &lowering, inst);
++               break;
++            case TGSI_OPCODE_DP4:
++               fp_emit_dp4(fp, &lowering, inst);
++               break;
+             case TGSI_OPCODE_LG2:
+                fp_emit_sfu_direct(fp, &lowering, inst, FP_SFU_OP_LG2);
+                break;
