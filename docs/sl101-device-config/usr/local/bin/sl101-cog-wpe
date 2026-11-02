@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+mode=--software
+[ "${SL101_COG_GPU:-0}" = 1 ] && mode=--gpu
+exec sudo -n /usr/local/bin/sl101-cog-wpe-root "$mode" "$@"

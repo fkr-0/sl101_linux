@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+if command -v bemenu >/dev/null 2>&1 && [ "${1:-}" != --prompt ]; then
+    url=$(printf '\n' | BEMENU_BACKEND=wayland bemenu --single-instance --fn 'sans 20' -p 'Open URL in Cog:') || exit 0
+else
+    if [ "${1:-}" != --prompt ]; then
+        exec foot --title='Open URL in Cog' /usr/local/bin/sl101-cog-url --prompt
+    fi
+    printf 'Open URL in Cog\n\nWebsite (for example de.wikipedia.org): '
+    IFS= read -r url || exit 0
+fi
+[ -n "$url" ] || exit 0
+if ! sudo -n /usr/local/sbin/sl101-cog-control open "$url"; then
+    exec foot --title='Cog could not open URL' sh -c 'printf "Could not open the website. See /var/log/sl101-cog-session.log.\nPress Enter to close. "; read -r ignored'
+fi

@@ -1,0 +1,7 @@
+#!/bin/sh
+# Restart nuraloumi-panel and reconfigure labwc (Super+Shift+R)
+pkill -f nuraloumi-panel 2>/dev/null
+sleep 0.5
+nohup /opt/nuraloumi/current/nuraloumi-panel --live --enable-renderer-switch \
+    >>"$HOME/.local/state/nuraloumi-panel.log" 2>&1 &
+kill -HUP "$(pgrep -x labwc)" 2>/dev/null || true

@@ -1,0 +1,2 @@
+#!/bin/sh
+exec footclient -e tmux -u new  -t home \; new-window # /usr/local/bin/sl101-tmux-session

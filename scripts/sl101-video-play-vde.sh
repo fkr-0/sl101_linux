@@ -84,9 +84,19 @@ if [ "$display_mode" = kms ]; then
     video_sink="kmssink"
 
     compositor_pid=""
+    had_pipewire=0
     if pgrep -x labwc >/dev/null 2>&1; then
         compositor_pid=$(pgrep -x labwc)
         printf 'sl101-video-vde: stopping compositor (pid %s) for DRM master\n' "$compositor_pid" >&2
+        # Stop PipeWire/WirePlumber first — they hold audio resources and
+        # fail to restart if killed after the compositor they depend on.
+        if pgrep -x wireplumber >/dev/null 2>&1; then
+            had_pipewire=1
+            pkill -x wireplumber 2>/dev/null || true
+            pkill -x pipewire-pulse 2>/dev/null || true
+            pkill -x pipewire 2>/dev/null || true
+            sleep 1
+        fi
         kill "$compositor_pid" 2>/dev/null || true
         sleep 2
     fi
@@ -107,6 +117,18 @@ if [ "$display_mode" = kms ]; then
         fi
         if [ -n "$compositor_pid" ]; then
             printf 'sl101-video-vde: restarting compositor\n' >&2
+            # Restart PipeWire/WirePlumber before the compositor
+            if [ "$had_pipewire" -eq 1 ]; then
+                su -s /bin/sh user -c "
+                    export XDG_RUNTIME_DIR=/run/sl101-desktop-user
+                    export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/sl101-desktop-user/sl101-desktop-bus
+                    nohup pipewire </dev/null >/dev/null 2>&1 &
+                    sleep 1
+                    nohup wireplumber </dev/null >/dev/null 2>&1 &
+                    nohup pipewire-pulse </dev/null >/dev/null 2>&1 &
+                "
+                sleep 1
+            fi
             su -s /bin/sh user -c "
                 export LIBSEAT_BACKEND=seatd
                 export XDG_RUNTIME_DIR=/run/sl101-desktop-user

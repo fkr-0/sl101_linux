@@ -1,0 +1,12 @@
+#!/usr/bin/python3
+import os, socket, subprocess
+SOCK = '/run/sl101-desktop-user/terminal-launch'
+try: os.unlink(SOCK)
+except: pass
+s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+s.bind(SOCK)
+os.chmod(SOCK, 0o666)
+while True:
+    s.recv(64)
+    subprocess.Popen(['footclient'], stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

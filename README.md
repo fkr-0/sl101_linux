@@ -1,6 +1,6 @@
 # Linux on ASUS Eee Pad Slider SL101
 
-This is the existing `fkr-0/sl101_linux` repository, extended with the SL101 Linux work extracted from `android-infra` on 2026-10-03. Its original Git history, `Makefile`, `build_kernel/`, `README.org`, and local `sl101/` tree are preserved.
+This is the existing `fkr-0/sl101_linux` repository, extended with the 2026 SL101 Linux work extracted from infrastructure on 2026-10-03. Its original Git history, `Makefile`, `build_kernel/`, `README.org`, are preserved.
 
 ## Current work
 

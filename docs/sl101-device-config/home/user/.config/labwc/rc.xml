@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<labwc_config>
+  <libinput>
+    <device category="Atmel maXTouch Touchscreen">
+      <calibrationMatrix>1 0 0 0 -1 1</calibrationMatrix>
+    </device>
+  </libinput>
+  <keyboard>
+    <keybind key="W-Return"><action name="Execute"><command>/usr/local/bin/sl101-foot-launch</command></action></keybind>
+    <keybind key="W-S-r"><action name="Execute"><command>/usr/local/bin/sl101-restart-shell</command></action></keybind>
+    <keybind key="W-S-q"><action name="Close"/></keybind>
+    <keybind key="W-u"><action name="Execute"><command>/usr/local/bin/sl101-cog-url</command></action></keybind>
+    <keybind key="C-A-F1"><action name="Execute"><command>sudo /usr/local/bin/sl101-chvt 1</command></action></keybind>
+    <keybind key="C-A-F2"><action name="Execute"><command>sudo /usr/local/bin/sl101-chvt 2</command></action></keybind>
+    <keybind key="C-A-F3"><action name="Execute"><command>sudo /usr/local/bin/sl101-chvt 3</command></action></keybind>
+    <keybind key="C-A-F4"><action name="Execute"><command>sudo /usr/local/bin/sl101-chvt 4</command></action></keybind>
+    <keybind key="C-A-F5"><action name="Execute"><command>sudo /usr/local/bin/sl101-chvt 5</command></action></keybind>
+    <keybind key="C-A-F6"><action name="Execute"><command>sudo /usr/local/bin/sl101-chvt 6</command></action></keybind>
+    <keybind key="C-A-F7"><action name="Execute"><command>sudo /usr/local/bin/sl101-chvt 7</command></action></keybind>
+    <keybind key="XF86AudioRaiseVolume"><action name="Execute"><command>amixer -c 0 sset 'Speaker' 5%+ &amp;&amp; amixer -c 0 sset 'Headphone' 5%+</command></action></keybind>
+    <keybind key="XF86AudioLowerVolume"><action name="Execute"><command>amixer -c 0 sset 'Speaker' 5%- &amp;&amp; amixer -c 0 sset 'Headphone' 5%-</command></action></keybind>
+  </keyboard>
+</labwc_config>

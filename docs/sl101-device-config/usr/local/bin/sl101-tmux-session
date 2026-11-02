@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /usr/bin/tmux -u new -A -t home \; neww

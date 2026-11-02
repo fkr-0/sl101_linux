@@ -1,0 +1,5 @@
+#!/bin/sh
+# VT switching for the SL101 slider keyboard.
+# Escape hatch: get to a text console when Wayland breaks.
+set -eu
+chvt "${1:?usage: sl101-chvt VT_NUMBER}"

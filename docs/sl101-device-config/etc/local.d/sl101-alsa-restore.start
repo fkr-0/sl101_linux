@@ -1,0 +1,5 @@
+#!/bin/sh
+# Restore saved ALSA mixer state (disables DAC/ADC Companding, Deemphasis)
+if [ -f /var/lib/alsa/asound.state ]; then
+    /usr/sbin/alsactl restore 0 2>/dev/null || true
+fi

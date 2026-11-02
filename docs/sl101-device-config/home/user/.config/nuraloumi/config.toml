@@ -1,0 +1,11 @@
+[launcher]
+pinned = ["sl101-firefox-debian.desktop", "foot.desktop", "sl101-doom.desktop"]
+
+[launcher.labels]
+"sl101-firefox-debian.desktop" = "Firefox"
+"foot.desktop" = "Terminal"
+"sl101-doom.desktop" = "Doom"
+
+[launcher.app_id_aliases]
+"sl101-firefox-debian.desktop" = ["firefox-esr"]
+"sl101-doom.desktop" = ["chocolate-doom"]
