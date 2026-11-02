@@ -1,0 +1,58 @@
+From: SL101 Grate bring-up <sl101@localhost>
+Subject: [PATCH] grate: expose experimental ESSL 1.00 with honest uniform caps
+
+Advertise ESSL 1.00 for GLES2 contexts without claiming full conformance.
+Correct the Gallium constant-buffer size units to bytes: reserve enough
+vertex uniform space for Mesa internals and expose the actual 32-scalar
+fragment FP20 uniform file. Retain unsupported optional features off.
+
+---
+diff --git a/src/gallium/drivers/grate/grate_screen.c b/src/gallium/drivers/grate/grate_screen.c
+--- a/src/gallium/drivers/grate/grate_screen.c
++++ b/src/gallium/drivers/grate/grate_screen.c
+@@ -80,10 +80,16 @@
+    caps->anisotropic_filter = false;
+    caps->occlusion_query = false;
+    caps->query_time_elapsed = false;
++   /* Arbitrary sampler-view swizzles are not implemented; leave the
++    * extension off until the corresponding resource/view paths work.
++    */
+    caps->texture_swizzle = false;
+    caps->texture_mirror_clamp = false;
+    caps->blend_equation_separate = true;
+    caps->fragment_shader_texture_lod = false;
++   /* OES_standard_derivatives is optional in GLES2, and grate has no
++    * validated fragment derivative implementation yet.
++    */
+    caps->fragment_shader_derivatives = false;
+    caps->primitive_restart = false;
+    caps->primitive_restart_fixed_index = false;
+@@ -176,7 +182,12 @@
+    caps->max_stream_output_interleaved_components = 0;
+    caps->glsl_feature_level = 120;
+    caps->glsl_feature_level_compatibility = 120;
+-   caps->essl_feature_level = 0;
++   /* Expose experimental ESSL 1.00 / GLES2 contexts, not conformance:
++    * fragment uniforms (32 FP20 scalars = 8 vec4) cannot meet the GLES2
++    * minimum (16 vec4), and shader/blend/format paths remain incomplete.
++    * Keep unimplemented extensions disabled rather than overstating them.
++    */
++   caps->essl_feature_level = 100;
+    caps->constant_buffer_offset_alignment = 4;
+    caps->min_map_buffer_alignment = 0;
+    caps->texture_buffer_offset_alignment = 0;
+@@ -250,7 +261,13 @@
+    case PIPE_SHADER_CAP_MAX_OUTPUTS:
+       return 16;
+    case PIPE_SHADER_CAP_MAX_CONST_BUFFER0_SIZE:
+-      return vertex ? 1024 : 32;
++      /* Gallium reports bytes. 144 VS vec4 slots leave room for Mesa's
++       * reserved clip-plane/point-size uniforms while meeting GLES2's
++       * 128 vertex vectors; VP has 256 hardware vector slots. FP has
++       * only FP_UNIFORM_COUNT (32) scalar FP20 slots = 8 vec4, below
++       * GLES2's 16; never advertise a fictitious FP uniform spill path.
++       */
++      return vertex ? 144 * 4 * sizeof(float) : FP_UNIFORM_COUNT * sizeof(float);
+    case PIPE_SHADER_CAP_MAX_CONST_BUFFERS:
+       /* grate_set_constant_buffer() only supports constant buffer slot 0.
+        * The Mesa-20 driver incorrectly grouped this count with buffer size.
