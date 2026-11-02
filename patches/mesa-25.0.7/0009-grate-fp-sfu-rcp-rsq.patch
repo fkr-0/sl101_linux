@@ -1,0 +1,15 @@
+--- a/src/gallium/drivers/grate/fp/tgsi.c
++++ b/src/gallium/drivers/grate/fp/tgsi.c
+@@ -1254,6 +1254,12 @@
+          else if (tgsi->FullToken.FullInstruction.Instruction.Opcode != TGSI_OPCODE_END) {
+             const struct tgsi_full_instruction *inst = &tgsi->FullToken.FullInstruction;
+             switch (inst->Instruction.Opcode) {
++            case TGSI_OPCODE_RCP:
++               fp_emit_sfu_direct(fp, &lowering, inst, FP_SFU_OP_RCP);
++               break;
++            case TGSI_OPCODE_RSQ:
++               fp_emit_sfu_direct(fp, &lowering, inst, FP_SFU_OP_RSQ);
++               break;
+             case TGSI_OPCODE_LG2:
+                fp_emit_sfu_direct(fp, &lowering, inst, FP_SFU_OP_LG2);
+                break;
