@@ -1,0 +1,134 @@
+From: SL101 Grate bring-up <sl101@localhost>
+Subject: [PATCH] grate: expose native A8, L8 and LA88 sampler formats
+
+Accept only native sampler swizzles for T20's fixed-format texture unit.
+Expose single-channel formats for 2D sampler views without claiming
+render-target or depth-stencil support.  Preserve 16-byte pitch layout
+and the existing native format IDs (already present in grate_resource.c).
+
+Hardware channel decode and linear sampling still require SL101 pixel
+qualification; this patch does not claim GPU conformance.
+---
+diff --git a/src/gallium/drivers/grate/grate_state.c b/src/gallium/drivers/grate/grate_state.c
+--- a/src/gallium/drivers/grate/grate_state.c
++++ b/src/gallium/drivers/grate/grate_state.c
+@@ -390,7 +390,40 @@
+    case PIPE_FORMAT_R8G8B8A8_UNORM:
+    case PIPE_FORMAT_B8G8R8A8_UNORM:
+    case PIPE_FORMAT_B8G8R8X8_UNORM:
++   case PIPE_FORMAT_A8_UNORM:
++   case PIPE_FORMAT_L8_UNORM:
++   case PIPE_FORMAT_L8A8_UNORM:
+       return true;
++   default:
++      return false;
++   }
++}
++
++/*
++ * T20 texture formats have fixed channel semantics; grate cannot program
++ * an arbitrary view swizzle.  Only accept each format's native mapping.
++ */
++static bool
++grate_check_sampler_swizzle(enum pipe_format format,
++                           unsigned r, unsigned g, unsigned b, unsigned a)
++{
++   switch (format) {
++   case PIPE_FORMAT_R8G8B8A8_UNORM:
++   case PIPE_FORMAT_B8G8R8A8_UNORM:
++      return r == PIPE_SWIZZLE_X && g == PIPE_SWIZZLE_Y &&
++             b == PIPE_SWIZZLE_Z && a == PIPE_SWIZZLE_W;
++   case PIPE_FORMAT_B8G8R8X8_UNORM:
++      return r == PIPE_SWIZZLE_X && g == PIPE_SWIZZLE_Y &&
++             b == PIPE_SWIZZLE_Z && a == PIPE_SWIZZLE_1;
++   case PIPE_FORMAT_A8_UNORM:
++      return r == PIPE_SWIZZLE_0 && g == PIPE_SWIZZLE_0 &&
++             b == PIPE_SWIZZLE_0 && a == PIPE_SWIZZLE_X;
++   case PIPE_FORMAT_L8_UNORM:
++      return r == PIPE_SWIZZLE_X && g == PIPE_SWIZZLE_X &&
++             b == PIPE_SWIZZLE_X && a == PIPE_SWIZZLE_1;
++   case PIPE_FORMAT_L8A8_UNORM:
++      return r == PIPE_SWIZZLE_X && g == PIPE_SWIZZLE_X &&
++             b == PIPE_SWIZZLE_X && a == PIPE_SWIZZLE_Y;
+    default:
+       return false;
+    }
+@@ -421,13 +454,12 @@
+        template->u.tex.last_level != 0 ||
+        template->u.tex.first_layer != 0 ||
+        template->u.tex.last_layer != 0 ||
+-       template->swizzle_r != PIPE_SWIZZLE_X ||
+-       template->swizzle_g != PIPE_SWIZZLE_Y ||
+-       template->swizzle_b != PIPE_SWIZZLE_Z ||
+-       (template->format == PIPE_FORMAT_B8G8R8X8_UNORM
+-          ? template->swizzle_a != PIPE_SWIZZLE_1
+-          : template->swizzle_a != PIPE_SWIZZLE_W) ||
+-       !grate_sampler_view_format_supported(template->format))
++       !grate_sampler_view_format_supported(template->format) ||
++       !grate_check_sampler_swizzle(template->format,
++                                    template->swizzle_r,
++                                    template->swizzle_g,
++                                    template->swizzle_b,
++                                    template->swizzle_a))
+       return NULL;
+ 
+    blocksize = util_format_get_blocksize(template->format);
+diff --git a/src/gallium/drivers/grate/grate_screen.c b/src/gallium/drivers/grate/grate_screen.c
+--- a/src/gallium/drivers/grate/grate_screen.c
++++ b/src/gallium/drivers/grate/grate_screen.c
+@@ -297,6 +297,17 @@
+                                  unsigned storage_sample_count,
+                                  unsigned usage)
+ {
++   /*
++    * A8/L8/LA88 are only qualified as sampled textures, not as render
++    * targets, scanout buffers or depth/stencil surfaces.
++    */
++   if ((format == PIPE_FORMAT_A8_UNORM ||
++        format == PIPE_FORMAT_L8_UNORM ||
++        format == PIPE_FORMAT_L8A8_UNORM) &&
++       (usage & (PIPE_BIND_RENDER_TARGET |
++                 PIPE_BIND_DEPTH_STENCIL | PIPE_BIND_SCANOUT)))
++      return false;
++
+    if (usage & (PIPE_BIND_RENDER_TARGET | PIPE_BIND_DEPTH_STENCIL)) {
+       /*
+        * R8G8B8A8 is exposed by this correction for sampler fallback only;
+@@ -329,16 +340,14 @@
+           format != PIPE_FORMAT_B8G8R8X8_UNORM)
+          return false;
+ 
+-      /*
+-       * The first texture milestone deliberately exposes only the format
+-       * whose sampled alpha semantics are fully defined. XRGB shares the
+-       * hardware storage format but still needs an explicit alpha=1 contract
+-       * before it can be advertised truthfully as a sampler view.
+-       */
++      /* Single-channel formats are supported for 2D sampler views only. */
+       if (target != PIPE_TEXTURE_2D ||
+           (format != PIPE_FORMAT_R8G8B8A8_UNORM &&
+            format != PIPE_FORMAT_B8G8R8A8_UNORM &&
+-           format != PIPE_FORMAT_B8G8R8X8_UNORM) ||
++           format != PIPE_FORMAT_B8G8R8X8_UNORM &&
++           format != PIPE_FORMAT_A8_UNORM &&
++           format != PIPE_FORMAT_L8_UNORM &&
++           format != PIPE_FORMAT_L8A8_UNORM) ||
+           sample_count > 1 || storage_sample_count > 1)
+          return false;
+    }
+diff --git a/src/gallium/drivers/grate/grate_resource.c b/src/gallium/drivers/grate/grate_resource.c
+--- a/src/gallium/drivers/grate/grate_resource.c
++++ b/src/gallium/drivers/grate/grate_resource.c
+@@ -166,6 +166,12 @@
+ grate_pixel_format(enum pipe_format format)
+ {
+    switch (format) {
++   /*
++    * Single-channel sampler formats use native T20 texture decode.
++    * A8/L8 are 1 byte/texel, LA88 is 2 bytes/texel; sampler-only pitch
++    * is derived from util_format_get_blocksize() and aligned to 16 bytes.
++    * Do not merge A8 and L8: their sampled channel semantics differ.
++    */
+    case PIPE_FORMAT_A8_UNORM:
+       return TGR3D_PIXEL_FORMAT_A8;
+    case PIPE_FORMAT_L8_UNORM:
