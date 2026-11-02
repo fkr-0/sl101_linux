@@ -1,0 +1,417 @@
+diff --git a/src/gallium/drivers/grate/grate_texture.h b/src/gallium/drivers/grate/grate_texture.h
+--- a/src/gallium/drivers/grate/grate_texture.h
++++ b/src/gallium/drivers/grate/grate_texture.h
+@@ -36,10 +36,11 @@
+ }
+ 
+ static inline bool
+-grate_texture_desc1_pack(unsigned format,
+-                         bool min_linear, bool mag_linear,
+-                         bool clamp_s, bool clamp_t,
+-                         uint32_t *word)
++grate_texture_desc1_pack_extended(unsigned format,
++                                  bool min_linear, bool mag_linear,
++                                  bool clamp_s, bool clamp_t,
++                                  bool mirror_s, bool mirror_t,
++                                  bool mip_linear_between, uint32_t *word)
+ {
+    if (!word || format > 0x1f)
+       return false;
+@@ -48,8 +49,23 @@
+            ((uint32_t)min_linear << 28) |
+            ((uint32_t)mag_linear << 29) |
+            ((uint32_t)clamp_s << 1) |
+-           (uint32_t)clamp_t;
++           (uint32_t)clamp_t |
++           ((uint32_t)mirror_s << 3) |
++           ((uint32_t)mirror_t << 2) |
++           ((uint32_t)mip_linear_between << 27);
+    return true;
++}
++
++/* Preserve the original level-zero descriptor API for other callers. */
++static inline bool
++grate_texture_desc1_pack(unsigned format,
++                         bool min_linear, bool mag_linear,
++                         bool clamp_s, bool clamp_t,
++                         uint32_t *word)
++{
++   return grate_texture_desc1_pack_extended(format, min_linear, mag_linear,
++                                            clamp_s, clamp_t, false, false,
++                                            false, word);
+ }
+ 
+ static inline bool
+@@ -71,24 +87,36 @@
+    return log2;
+ }
+ 
++/* T20 GR3D: bit 7 disables mipmapping, MAX_LOD is bits 12..15.
++ * Verified against grate-driver/grate ce8c4d2 src/libgrate/grate-3d.c.
++ * An NPOT image cannot use the POT mip chain addressing.
++ */
+ static inline bool
+-grate_texture_desc2_pack(unsigned width, unsigned height, uint32_t *word)
++grate_texture_desc2_pack_extended(unsigned width, unsigned height,
++                                  unsigned max_lod, bool mipmap,
++                                  uint32_t *word)
+ {
+-   uint32_t value = 1u << 7; /* mipmap disable */
++   uint32_t value = mipmap ? 0u : (1u << 7);
+ 
+-   if (!word || !width || !height || width > 4095 || height > 4095)
++   if (!word || !width || !height || width > 4095 || height > 4095 ||
++       max_lod > 15 || (!mipmap && max_lod != 0))
+       return false;
+ 
+    if (grate_texture_is_pow2(width) && grate_texture_is_pow2(height)) {
+       unsigned width_log2 = grate_texture_log2(width);
+       unsigned height_log2 = grate_texture_log2(height);
++      unsigned available = width_log2 > height_log2 ?
++                           width_log2 : height_log2;
+ 
+-      if (width_log2 > 15 || height_log2 > 15)
++      if (width_log2 > 15 || height_log2 > 15 || max_lod > available)
+          return false;
+ 
+       value |= width_log2 << 28;
+       value |= height_log2 << 24;
++      value |= max_lod << 12;
+    } else {
++      if (mipmap)
++         return false;
+       value |= 1u << 6; /* explicit NPOT dimensions */
+       value |= width << 20;
+       value |= height << 8;
+@@ -96,6 +124,12 @@
+ 
+    *word = value;
+    return true;
++}
++
++static inline bool
++grate_texture_desc2_pack(unsigned width, unsigned height, uint32_t *word)
++{
++   return grate_texture_desc2_pack_extended(width, height, 0, false, word);
+ }
+ 
+ /*
+diff --git a/src/gallium/drivers/grate/grate_resource.h b/src/gallium/drivers/grate/grate_resource.h
+--- a/src/gallium/drivers/grate/grate_resource.h
++++ b/src/gallium/drivers/grate/grate_resource.h
+@@ -12,6 +12,9 @@
+    struct pipe_resource base;
+    struct drm_tegra_bo *bo;
+    unsigned int pitch;
++   /* Levels are packed sequentially, with each row aligned to 16 bytes. */
++   unsigned int level_offset[PIPE_MAX_TEXTURE_LEVELS];
++   unsigned int level_pitch[PIPE_MAX_TEXTURE_LEVELS];
+    unsigned int tiled : 1;
+    unsigned int format : 5;
+ };
+diff --git a/src/gallium/drivers/grate/grate_resource.c b/src/gallium/drivers/grate/grate_resource.c
+--- a/src/gallium/drivers/grate/grate_resource.c
++++ b/src/gallium/drivers/grate/grate_resource.c
+@@ -15,6 +15,7 @@
+ #include "grate_context.h"
+ #include "grate_resource.h"
+ #include "grate_screen.h"
++#include "grate_texture.h"
+ 
+ #include "host1x01_hardware.h"
+ #include "tgr_3d.xml.h"
+@@ -94,7 +95,22 @@
+    void *ret = NULL;
+    struct pipe_transfer *ptrans;
+ 
++   unsigned width, height;
++   const unsigned bpp = util_format_get_blocksize(presource->format);
++
+    if (usage & PIPE_MAP_DIRECTLY)
++      return NULL;
++   if (level >= PIPE_MAX_TEXTURE_LEVELS || level > presource->last_level)
++      return NULL;
++
++   /* Reject unallocated levels and out-of-bounds mapped regions. */
++   width = MAX2(presource->width0 >> level, 1u);
++   height = MAX2(presource->height0 >> level, 1u);
++   if (!resource->level_pitch[level] || box->z != 0 || box->depth != 1 ||
++       box->x < 0 || box->y < 0 || box->width <= 0 || box->height <= 0 ||
++       (unsigned)box->x > width || (unsigned)box->y > height ||
++       (unsigned)box->width > width - (unsigned)box->x ||
++       (unsigned)box->height > height - (unsigned)box->y)
+       return NULL;
+ 
+    /* CPU access must observe completion of prior GPU writes. */
+@@ -118,13 +134,12 @@
+    ptrans->level = level;
+    ptrans->usage = usage;
+    ptrans->box = *box;
+-   ptrans->stride = resource->pitch;
+-   ptrans->layer_stride = ptrans->stride * presource->height0;
++   ptrans->stride = resource->level_pitch[level];
++   ptrans->layer_stride = ptrans->stride * height;
+    *transfer = ptrans;
+ 
+-   return (uint8_t *)ret +
+-          box->y * resource->pitch +
+-          box->x * util_format_get_blocksize(presource->format);
++   return (uint8_t *)ret + resource->level_offset[level] +
++          box->y * resource->level_pitch[level] + box->x * bpp;
+ }
+ 
+ static void
+@@ -205,7 +220,29 @@
+    struct grate_screen *screen = grate_screen(pscreen);
+    struct grate_resource *resource;
+    uint32_t flags = 0, height, size;
++   uint64_t total;
++   unsigned bpp, max_lod;
+    int err;
++
++   /* No fabricated cube, multi-layer, NPOT mipmap or renderable mip support. */
++   if (template->last_level >= PIPE_MAX_TEXTURE_LEVELS ||
++       (template->target == PIPE_TEXTURE_2D &&
++        (template->width0 == 0 || template->height0 == 0)) ||
++       (template->last_level &&
++        (template->depth0 != 1 || template->array_size != 1)))
++      return NULL;
++
++   max_lod = MAX2(grate_texture_log2(template->width0),
++                  grate_texture_log2(template->height0));
++   if (template->last_level &&
++       (template->target != PIPE_TEXTURE_2D ||
++        !(template->bind & PIPE_BIND_SAMPLER_VIEW) ||
++        (template->bind & (PIPE_BIND_RENDER_TARGET | PIPE_BIND_SCANOUT |
++                           PIPE_BIND_DEPTH_STENCIL)) ||
++        !grate_texture_is_pow2(template->width0) ||
++        !grate_texture_is_pow2(template->height0) ||
++        template->last_level > max_lod))
++      return NULL;
+ 
+    resource = CALLOC_STRUCT(grate_resource);
+    if (!resource)
+@@ -260,7 +297,30 @@
+       resource->format = format;
+    }
+ 
+-   size = resource->pitch * height;
++   /* A mip chain is one BO: level 0 then level 1... with pitch16 rows.
++    * The exact layout follows grate-driver/grate ce8c4d2 alloc_mipmap().
++    * Keep the historical allocation unchanged for nonmipped surfaces.
++    */
++   bpp = util_format_get_blocksize(template->format);
++   resource->level_pitch[0] = resource->pitch;
++   total = (uint64_t)resource->pitch * height;
++   for (unsigned level = 1; level <= template->last_level; ++level) {
++      unsigned lw = MAX2(template->width0 >> level, 1u);
++      unsigned lh = MAX2(template->height0 >> level, 1u);
++      unsigned lpitch = align(lw * bpp, 16);
++      if (total > 0xffffffffu - (uint64_t)lpitch * lh) {
++         FREE(resource);
++         return NULL;
++      }
++      resource->level_offset[level] = (unsigned)total;
++      resource->level_pitch[level] = lpitch;
++      total += (uint64_t)lpitch * lh;
++   }
++   if (total > 0xffffffffu) {
++      FREE(resource);
++      return NULL;
++   }
++   size = (uint32_t)total;
+ 
+    err = drm_tegra_bo_new(&resource->bo, screen->drm, flags, size);
+    if (err < 0) {
+@@ -280,6 +340,12 @@
+    struct grate_screen *screen = grate_screen(pscreen);
+    struct grate_resource *resource;
+    int err, format;
++
++   /* An imported dma-buf has only a single advertised stride and no
++    * trustworthy per-level layout. Reject mipmapped imports.
++    */
++   if (template->last_level || template->target != PIPE_TEXTURE_2D)
++      return NULL;
+ 
+    resource = CALLOC_STRUCT(grate_resource);
+    if (!resource)
+@@ -316,6 +382,7 @@
+    }
+ 
+    resource->pitch = handle->stride;
++   resource->level_pitch[0] = handle->stride;
+ 
+    format = grate_pixel_format(template->format);
+    assert(format >= 0);
+diff --git a/src/gallium/drivers/grate/grate_state.h b/src/gallium/drivers/grate/grate_state.h
+--- a/src/gallium/drivers/grate/grate_state.h
++++ b/src/gallium/drivers/grate/grate_state.h
+@@ -57,6 +57,9 @@
+    uint16_t mask;
+ };
+ 
++bool
++grate_sampler_bindings_supported(struct grate_context *context);
++
+ void
+ grate_emit_state(struct grate_context *context);
+ 
+diff --git a/src/gallium/drivers/grate/grate_state.c b/src/gallium/drivers/grate/grate_state.c
+--- a/src/gallium/drivers/grate/grate_state.c
++++ b/src/gallium/drivers/grate/grate_state.c
+@@ -341,7 +341,8 @@
+ grate_sampler_wrap_supported(unsigned wrap)
+ {
+    return wrap == PIPE_TEX_WRAP_REPEAT ||
+-          wrap == PIPE_TEX_WRAP_CLAMP_TO_EDGE;
++          wrap == PIPE_TEX_WRAP_CLAMP_TO_EDGE ||
++          wrap == PIPE_TEX_WRAP_MIRROR_REPEAT;
+ }
+ 
+ static void *
+@@ -349,7 +350,7 @@
+                            const struct pipe_sampler_state *template)
+ {
+    struct grate_sampler_state *so = CALLOC_STRUCT(grate_sampler_state);
+-   bool min_linear, mag_linear, clamp_s, clamp_t;
++   bool min_linear, mag_linear, clamp_s, clamp_t, mirror_s, mirror_t;
+ 
+    if (!so)
+       return NULL;
+@@ -360,7 +361,9 @@
+        template->compare_mode != PIPE_TEX_COMPARE_NONE ||
+        template->max_anisotropy > 1 ||
+        template->lod_bias != 0.0f ||
+-       template->min_mip_filter != PIPE_TEX_MIPFILTER_NONE ||
++       (template->min_mip_filter != PIPE_TEX_MIPFILTER_NONE &&
++        template->min_mip_filter != PIPE_TEX_MIPFILTER_NEAREST &&
++        template->min_mip_filter != PIPE_TEX_MIPFILTER_LINEAR) ||
+        (template->min_img_filter != PIPE_TEX_FILTER_NEAREST &&
+         template->min_img_filter != PIPE_TEX_FILTER_LINEAR) ||
+        (template->mag_img_filter != PIPE_TEX_FILTER_NEAREST &&
+@@ -373,9 +376,13 @@
+    mag_linear = template->mag_img_filter == PIPE_TEX_FILTER_LINEAR;
+    clamp_s = template->wrap_s == PIPE_TEX_WRAP_CLAMP_TO_EDGE;
+    clamp_t = template->wrap_t == PIPE_TEX_WRAP_CLAMP_TO_EDGE;
+-
+-   if (!grate_texture_desc1_pack(0, min_linear, mag_linear,
+-                                 clamp_s, clamp_t, &so->desc1)) {
++   mirror_s = template->wrap_s == PIPE_TEX_WRAP_MIRROR_REPEAT;
++   mirror_t = template->wrap_t == PIPE_TEX_WRAP_MIRROR_REPEAT;
++
++   if (!grate_texture_desc1_pack_extended(
++          0, min_linear, mag_linear, clamp_s, clamp_t, mirror_s, mirror_t,
++          template->min_mip_filter == PIPE_TEX_MIPFILTER_LINEAR,
++          &so->desc1)) {
+       FREE(so);
+       return NULL;
+    }
+@@ -469,12 +476,13 @@
+    if (texture->target != PIPE_TEXTURE_2D ||
+        template->target != PIPE_TEXTURE_2D ||
+        template->u.tex.first_level != 0 ||
+-       template->u.tex.last_level != 0 ||
++       template->u.tex.last_level > texture->last_level ||
+        template->u.tex.first_layer != 0 ||
+        template->u.tex.last_layer != 0 ||
+        !grate_check_sampler_swizzle(template->format,
+                                     template->swizzle_r, template->swizzle_g,
+                                     template->swizzle_b, template->swizzle_a))
++      return NULL;
+ 
+    blocksize = util_format_get_blocksize(template->format);
+    /* T20 derives linear texture row stride at 16-byte alignment. */
+@@ -492,8 +500,10 @@
+    if (!view)
+       return NULL;
+ 
+-   if (!grate_texture_desc2_pack(texture->width0, texture->height0,
+-                                 &view->desc2)) {
++   if (!grate_texture_desc2_pack_extended(
++          texture->width0, texture->height0,
++          template->u.tex.last_level,
++          template->u.tex.last_level != 0, &view->desc2)) {
+       FREE(view);
+       return NULL;
+    }
+@@ -973,6 +983,34 @@
+    grate_stream_push_words(stream, blob->commands, blob->num_commands, 0);
+ }
+ 
++/* Invalid sampler/mip combinations must never draw using stale GR3D state.
++ * GL incomplete-texture fallback remains a separate state-tracker obligation.
++ */
++bool
++grate_sampler_bindings_supported(struct grate_context *context)
++{
++   for (unsigned i = 0; i < 16; ++i) {
++      struct grate_sampler_state *sampler = context->samplers[i];
++      struct pipe_sampler_view *view = context->sampler_views[i];
++      unsigned required;
++
++      if (!sampler)
++         continue;
++      if (!view || view->target != PIPE_TEXTURE_2D ||
++          view->u.tex.first_level != 0)
++         return false;
++      if (sampler->base.min_mip_filter == PIPE_TEX_MIPFILTER_NONE)
++         continue;
++      required = MAX2(grate_texture_log2(view->texture->width0),
++                      grate_texture_log2(view->texture->height0));
++      if (!grate_texture_is_pow2(view->texture->width0) ||
++          !grate_texture_is_pow2(view->texture->height0) ||
++          view->u.tex.last_level != required)
++         return false;
++   }
++   return true;
++}
++
+ static void
+ emit_textures(struct grate_context *context)
+ {
+@@ -997,6 +1035,11 @@
+       uint32_t reloc_word = reloc_slot ? *reloc_slot : 0;
+ 
+       uint32_t desc1 = sampler->desc1 | view->format_bits;
++      uint32_t desc2 = view->desc2;
++      if (sampler->base.min_mip_filter == PIPE_TEX_MIPFILTER_NONE)
++         desc2 |= 1u << 7;
++      else
++         desc2 &= ~(1u << 7);
+       if (grate_debug & GRATE_DEBUG_FORMAT) {
+          uint32_t handle = 0, bo_size = 0, bo_flags = 0;
+          struct drm_tegra_bo_tiling tiling = {0};
+@@ -1011,7 +1054,7 @@
+                  "grate: tex_state slot=%u pipefmt=%s hwfmt=0x%x pitch=%u size=%ux%u sampler=0x%08x format=0x%08x desc1=0x%08x desc2=0x%08x handle=%u bo_size=%u bo_flags=0x%x tiling_mode=%u tiling_value=%u reloc_offset=0 reloc_word=0x%08x handle_err=%d size_err=%d flags_err=%d tiling_err=%d map_err=%d map=%p",
+                  i, util_format_name(pview->format), resource->format,
+                  resource->pitch, pview->texture->width0, pview->texture->height0,
+-                 sampler->desc1, view->format_bits, desc1, view->desc2,
++                 sampler->desc1, view->format_bits, desc1, desc2,
+                  handle, bo_size, bo_flags, tiling.mode, tiling.value,
+                  reloc_word, handle_err, size_err, flags_err, tiling_err,
+                  map_err, map);
+@@ -1062,7 +1105,7 @@
+       grate_stream_push(stream,
+                         host1x_opcode_incr(TGR3D_TEXTURE_DESC1(i), 2));
+       grate_stream_push(stream, desc1);
+-      grate_stream_push(stream, view->desc2);
++      grate_stream_push(stream, desc2);
+    }
+ }
+ 
+diff --git a/src/gallium/drivers/grate/grate_draw.c b/src/gallium/drivers/grate/grate_draw.c
+--- a/src/gallium/drivers/grate/grate_draw.c
++++ b/src/gallium/drivers/grate/grate_draw.c
+@@ -80,6 +80,11 @@
+    if (info->instance_count != 1 || info->start_instance ||
+        (info->index_size && trimmed.index_bias != 0)) {
+       unimplemented();
++      return;
++   }
++
++   if (!grate_sampler_bindings_supported(context)) {
++      fprintf(stderr, "grate: invalid 2D texture/mipmap bindings; draw rejected\n");
+       return;
+    }
+ 
