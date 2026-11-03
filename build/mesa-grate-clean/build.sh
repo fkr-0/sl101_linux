@@ -48,7 +48,7 @@ if [ -d "/build/grate-libdrm" ]; then
         -Dvmwgfx=false -Dfreedreno=false -Dvc4=false -Detnaviv=false \
         -Dexynos=false -Domap=false -Dlibkms=false \
         -Dcairo-tests=false -Dman-pages=false -Dvalgrind=false \
-        -Dinstall-test-programs=false 2>&1 || true
+        -Dinstall-test-programs=false 2>&1
     if [ -d builddir ]; then
         ninja -C builddir -j$(nproc) 2>&1
         # Find and install the tegra library and headers
@@ -84,7 +84,14 @@ TEGRPC
     if [ -f "$LIBDRM_PATCHES/libdrm-tegra-dmabuf-seek.patch" ]; then
         echo "  Applying libdrm dmabuf-seek patch"
         cd /build/grate-libdrm
-        patch -p1 < "$LIBDRM_PATCHES/libdrm-tegra-dmabuf-seek.patch" 2>&1 || true
+        if patch --batch --dry-run --fuzz=0 -p1 < "$LIBDRM_PATCHES/libdrm-tegra-dmabuf-seek.patch" >/dev/null 2>&1; then
+            patch --batch --fuzz=0 --no-backup-if-mismatch -p1 < "$LIBDRM_PATCHES/libdrm-tegra-dmabuf-seek.patch"
+        elif patch --batch --dry-run --fuzz=0 -R -p1 < "$LIBDRM_PATCHES/libdrm-tegra-dmabuf-seek.patch" >/dev/null 2>&1; then
+            echo "  libdrm dmabuf-seek patch already present"
+        else
+            echo "ERROR: libdrm dmabuf-seek patch is neither applicable nor present" >&2
+            exit 1
+        fi
         ninja -C builddir -j$(nproc) 2>&1
         tegra_lib=$(find builddir -name "libdrm_tegra.so*" -not -type l | head -1)
         if [ -n "$tegra_lib" ]; then
