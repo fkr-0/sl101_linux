@@ -1,0 +1,20 @@
+# Mesa 25.0.7 Grate original L1 patch-family source provenance.
+# Generated from actual file contents 2026-11-03; paths relative to repository root.
+# Verify with: sha256sum -c patches/mesa-25.0.7/stack-l1.sha256
+# This is a HASH INVENTORY, NOT an accepted apply-order or a green build.
+# Intended FP dependency order: MIN/MAX -> CSEL/CMP -> SFU -> RCP/RSQ -> FRC/DP -> LRP (LRP requires context rebase).
+# VP: vector -> scalar. Texture/caps: single-channel -> GLES2 caps.
+# Blend and draw overlap grate_context.h; resolve shared-context edits before accepting.
+# Reviews: FP and VP/caps NO-GO; do not promote GLES2 caps, ignore warnings, or ship to device.
+2478106d2c2738f5c0d32d5be9e64c3ff4d375428909cbfc170eb9dfd24171d6  patches/mesa-25.0.7/0003-grate-fp-alu-min-max.patch
+53d505c42cc67e109ab3c6bb1fb2d913954ffd2ef3a6ce14966e7149712c390e  patches/mesa-25.0.7/0005-grate-fp-csel-comparisons.patch
+5aa5fc4c323a69aa102b571c190f73b84e10d10ae71421fbc5572250c4211ec2  patches/mesa-25.0.7/0006-grate-fp-transcendentals.patch
+62c3dcc7df98b5f7af8efac6cfb8d5054d116eda6ab4552f7602b4860bee1d18  patches/mesa-25.0.7/0009-grate-fp-sfu-rcp-rsq.patch
+069e06e2749997afe2cda662a666ae1e3f9435ea31d7f4ef94177bbdfff8f52f  patches/mesa-25.0.7/0012-grate-fp-frc-dp3-dp4.patch
+47f8e358fa4c61513fb28a953a5126afdf39264ebd8f60d3ff24d258a0f89fd4  patches/mesa-25.0.7/0004-grate-fp-lrp.patch
+84a792a98d5a36ea259c2d8966de1d90889a9a84dcea087dc19b1f113f9c1035  patches/mesa-25.0.7/0007-grate-vp-vector-ops.patch
+01cafd8a04bac9a795741851a02d17cfe99ee40a36c22536e8fa62dbf6df2874  patches/mesa-25.0.7/0008-grate-vp-scalar-ops.patch
+43eabcde3d1b141077b1914ca6b0cc4c7872794e7264c315347db2f960804694  patches/mesa-25.0.7/0010-grate-blend-expansion.patch
+4bdf261028624cf7e3038581292d66c81878064be04c0ea038974e21bdedb8a8  patches/mesa-25.0.7/0004-grate-single-channel-sampler-formats.patch
+e90e907dad5c01a61c56c2ba7b7ce7018462f74eb2cd4f48fb39f3e50b2972f8  patches/mesa-25.0.7/0011-grate-screen-gles2-caps.patch
+ea9831d9aa0f1a69a688a216c7c7850ce8facf044a4b13a647efcdc1503ab4d0  patches/mesa-25.0.7/0012-grate-draw-path.patch
