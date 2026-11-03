@@ -1,0 +1,335 @@
+diff --git a/platform/drm/cog-drm-modeset-renderer.c b/platform/drm/cog-drm-modeset-renderer.c
+index c1c91c2..43296d2 100644
+--- a/platform/drm/cog-drm-modeset-renderer.c
++++ b/platform/drm/cog-drm-modeset-renderer.c
+@@ -87,6 +87,8 @@ typedef struct {
+     GSource *drm_source;
+ 
+     struct buffer_object *committed_buffer;
++    struct wl_list        pending_flips; /* FlipHandlerData::link */
++    bool                  stopping;
+     struct wl_list        buffer_list; /* buffer_object::link */
+ 
+     struct wpe_view_backend_exportable_fdo *exportable;
+@@ -113,26 +115,35 @@ get_drm_fd(CogDrmModesetRenderer *self)
+     return s->pfd.fd;
+ }
+ 
++static void
++release_buffer_exports(CogDrmModesetRenderer *renderer, struct buffer_object *buffer)
++{
++    /* Clear before dispatch: FDO may synchronously reenter our callbacks. */
++    struct wl_resource *resource = g_steal_pointer(&buffer->export.resource);
++    struct wpe_fdo_shm_exported_buffer *shm = g_steal_pointer(&buffer->export.shm_buffer);
++    if (resource)
++        wpe_view_backend_exportable_fdo_dispatch_release_buffer(renderer->exportable, resource);
++    if (shm)
++        wpe_view_backend_exportable_fdo_dispatch_release_shm_exported_buffer(renderer->exportable, shm);
++}
++
+ static void
+ destroy_buffer(CogDrmModesetRenderer *renderer, struct buffer_object *buffer)
+ {
++    g_assert(renderer->exportable || (!buffer->export.resource && !buffer->export.shm_buffer));
++    if (renderer->exportable)
++        release_buffer_exports(renderer, buffer);
+     drmModeRmFB(get_drm_fd(renderer), buffer->fb_id);
+     gbm_bo_destroy(buffer->bo);
+-
+-    if (buffer->export.resource) {
+-        wpe_view_backend_exportable_fdo_dispatch_release_buffer(renderer->exportable, buffer->export.resource);
+-        buffer->export.resource = NULL;
+-    }
+-
+-    if (buffer->export.shm_buffer) {
+-        wpe_view_backend_exportable_fdo_dispatch_release_shm_exported_buffer(renderer->exportable,
+-                                                                             buffer->export.shm_buffer);
+-        buffer->export.shm_buffer = NULL;
+-    }
+-
+     g_free(buffer);
+ }
+ 
++typedef struct {
++    struct wl_list        link;
++    CogDrmModesetRenderer *renderer;
++    struct buffer_object  *buffer;
++} FlipHandlerData;
++
+ static void
+ destroy_buffer_notify(struct wl_listener *listener, void *data)
+ {
+@@ -142,8 +153,15 @@ destroy_buffer_notify(struct wl_listener *listener, void *data)
+     if (renderer->committed_buffer == buffer)
+         renderer->committed_buffer = NULL;
+ 
++    /* Flip completions must not dereference a deleted wl_resource buffer. */
++    FlipHandlerData *flip;
++    wl_list_for_each(flip, &renderer->pending_flips, link) {
++        if (flip->buffer == buffer)
++            flip->buffer = NULL;
++    }
+     wl_list_remove(&buffer->link);
+-
++    /* The wl_resource is in destruction; never send its address to FDO. */
++    buffer->export.resource = NULL;
+     wl_resource_set_user_data(buffer->buffer_resource, NULL);
+     destroy_buffer(renderer, buffer);
+ }
+@@ -316,10 +334,22 @@ drm_copy_shm_buffer_into_bo(struct wl_shm_buffer *shm_buffer, struct gbm_bo *bo)
+     gbm_bo_unmap(bo, map_data);
+ }
+ 
+-typedef struct {
+-    CogDrmModesetRenderer *renderer;
+-    struct buffer_object  *buffer;
+-} FlipHandlerData;
++static FlipHandlerData *
++new_flip_data(CogDrmModesetRenderer *self, struct buffer_object *buffer)
++{
++    FlipHandlerData *data = g_slice_new0(FlipHandlerData);
++    data->renderer = self;
++    data->buffer = buffer;
++    wl_list_insert(&self->pending_flips, &data->link);
++    return data;
++}
++
++static void
++free_flip_data(FlipHandlerData *data)
++{
++    wl_list_remove(&data->link);
++    g_slice_free(FlipHandlerData, data);
++}
+ 
+ static int
+ drm_commit_buffer_nonatomic(CogDrmModesetRenderer *self, struct buffer_object *buffer)
+@@ -333,10 +363,11 @@ drm_commit_buffer_nonatomic(CogDrmModesetRenderer *self, struct buffer_object *b
+         self->mode_set = true;
+     }
+ 
+-    FlipHandlerData *data = g_slice_new(FlipHandlerData);
+-    *data = (FlipHandlerData){self, buffer};
+-
+-    return drmModePageFlip(get_drm_fd(self), self->crtc_id, buffer->fb_id, DRM_MODE_PAGE_FLIP_EVENT, data);
++    FlipHandlerData *data = new_flip_data(self, buffer);
++    int ret = drmModePageFlip(get_drm_fd(self), self->crtc_id, buffer->fb_id, DRM_MODE_PAGE_FLIP_EVENT, data);
++    if (ret)
++        free_flip_data(data);
++    return ret;
+ }
+ 
+ static int
+@@ -427,11 +458,11 @@ drm_commit_buffer_atomic(CogDrmModesetRenderer *self, struct buffer_object *buff
+         return -1;
+     }
+ 
+-    FlipHandlerData *data = g_slice_new(FlipHandlerData);
+-    *data = (FlipHandlerData){self, buffer};
+-
++    FlipHandlerData *data = new_flip_data(self, buffer);
+     ret = drmModeAtomicCommit(get_drm_fd(self), req, flags, data);
+     if (ret) {
++        free_flip_data(data);
++        self->mode_set = false;
+         drmModeAtomicFree(req);
+         return -1;
+     }
+@@ -449,8 +480,12 @@ drm_commit_buffer(CogDrmModesetRenderer *self, struct buffer_object *buffer)
+     else
+         ret = drm_commit_buffer_nonatomic(self, buffer);
+ 
+-    if (ret)
++    if (ret) {
+         g_warning("failed to schedule a page flip: %s", g_strerror(errno));
++        /* No page-flip event will arrive to acknowledge this export. */
++        release_buffer_exports(self, buffer);
++        wpe_view_backend_exportable_fdo_dispatch_frame_complete(self->exportable);
++    }
+ }
+ 
+ static void
+@@ -551,25 +586,16 @@ on_export_shm_buffer(void *data, struct wpe_fdo_shm_exported_buffer *exported_bu
+ static void
+ drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec, unsigned int usec, void *data)
+ {
+-    CogDrmModesetRenderer *self = ((FlipHandlerData *) data)->renderer;
+-    struct buffer_object  *buffer = ((FlipHandlerData *) data)->buffer;
+-    g_slice_free(FlipHandlerData, data);
+-
+-    if (self->committed_buffer) {
+-        struct buffer_object *buffer = self->committed_buffer;
++    FlipHandlerData *flip = data;
++    CogDrmModesetRenderer *self = flip->renderer;
++    struct buffer_object *buffer = flip->buffer;
++    free_flip_data(flip);
+ 
+-        if (buffer->export.resource) {
+-            wpe_view_backend_exportable_fdo_dispatch_release_buffer(self->exportable, buffer->export.resource);
+-            buffer->export.resource = NULL;
+-        }
+-
+-        if (buffer->export.shm_buffer) {
+-            wpe_view_backend_exportable_fdo_dispatch_release_shm_exported_buffer(self->exportable,
+-                                                                                 buffer->export.shm_buffer);
+-            buffer->export.shm_buffer = NULL;
+-        }
+-    }
++    if (self->stopping)
++        return;
+ 
++    if (self->committed_buffer)
++        release_buffer_exports(self, self->committed_buffer);
+     self->committed_buffer = buffer;
+     wpe_view_backend_exportable_fdo_dispatch_frame_complete(self->exportable);
+ }
+@@ -585,18 +611,36 @@ cog_drm_modeset_renderer_initialize(CogDrmRenderer *renderer, GError **error)
+ }
+ 
+ static void
+-cog_drm_modeset_renderer_destroy(CogDrmRenderer *renderer)
++cog_drm_modeset_renderer_stop_exportable(CogDrmRenderer *renderer)
+ {
+     CogDrmModesetRenderer *self = wl_container_of(renderer, self, base);
++    if (self->stopping)
++        return;
++    self->stopping = true;
++    /* Prevent any late libdrm callback from observing freed renderer state. */
++    g_source_destroy(self->drm_source);
++
++    FlipHandlerData *flip, *next;
++    wl_list_for_each_safe(flip, next, &self->pending_flips, link)
++        free_flip_data(flip);
+ 
+     struct buffer_object *buffer, *tmp;
+     wl_list_for_each_safe(buffer, tmp, &self->buffer_list, link) {
+         wl_list_remove(&buffer->link);
+         wl_list_remove(&buffer->destroy_listener.link);
++        wl_resource_set_user_data(buffer->buffer_resource, NULL);
+         destroy_buffer(self, buffer);
+     }
+-    wl_list_init(&self->buffer_list);
+     self->committed_buffer = NULL;
++    self->exportable = NULL;
++}
++
++static void
++cog_drm_modeset_renderer_destroy(CogDrmRenderer *renderer)
++{
++    CogDrmModesetRenderer *self = wl_container_of(renderer, self, base);
++    cog_drm_modeset_renderer_stop_exportable(renderer);
++    g_source_unref(self->drm_source);
+ 
+     if (self->connector_props.props_info) {
+         for (uint32_t i = 0; i < self->connector_props.props->count_props; i++)
+@@ -651,6 +695,7 @@ cog_drm_modeset_renderer_new(struct gbm_device     *gbm_dev,
+         .base.name = "modeset",
+         .base.initialize = cog_drm_modeset_renderer_initialize,
+         .base.destroy = cog_drm_modeset_renderer_destroy,
++        .base.stop_exportable = cog_drm_modeset_renderer_stop_exportable,
+         .base.create_exportable = cog_drm_modeset_renderer_create_exportable,
+ 
+         .drm_source = drm_event_source_new(gbm_device_get_fd(gbm_dev)),
+@@ -661,6 +706,7 @@ cog_drm_modeset_renderer_new(struct gbm_device     *gbm_dev,
+         .plane_id = plane_id,
+         .atomic_modesetting = atomic_modesetting,
+     };
++    wl_list_init(&self->pending_flips);
+     wl_list_init(&self->buffer_list);
+     memcpy(&self->mode, mode, sizeof(drmModeModeInfo));
+ 
+diff --git a/platform/drm/cog-drm-renderer.h b/platform/drm/cog-drm-renderer.h
+index 6b8c4fa..9fe7357 100644
+--- a/platform/drm/cog-drm-renderer.h
++++ b/platform/drm/cog-drm-renderer.h
+@@ -21,6 +21,8 @@ struct _CogDrmRenderer {
+ 
+     bool (*initialize)(CogDrmRenderer *, GError **);
+     void (*destroy)(CogDrmRenderer *);
++    /* Stop async callbacks and release exports while FDO is still alive. */
++    void (*stop_exportable)(CogDrmRenderer *);
+ 
+     bool (*set_rotation)(CogDrmRenderer *, CogGLRendererRotation, bool apply);
+ 
+diff --git a/platform/drm/cog-platform-drm.c b/platform/drm/cog-platform-drm.c
+index b9f28a8..c97da05 100644
+--- a/platform/drm/cog-platform-drm.c
++++ b/platform/drm/cog-platform-drm.c
+@@ -74,9 +74,12 @@ struct _CogDrmPlatformClass {
+     CogPlatformClass parent_class;
+ };
+ 
++typedef struct _CogDrmExportableOwner CogDrmExportableOwner;
++
+ struct _CogDrmPlatform {
+     CogPlatform            parent;
+     CogDrmRenderer        *renderer;
++    CogDrmExportableOwner *export_owner;
+     CogGLRendererRotation  rotation;
+     GList                 *rotatable_input_devices;
+     bool                   use_gles;
+@@ -1500,6 +1503,33 @@ cog_drm_platform_setup(CogPlatform *platform, CogShell *shell, const char *param
+     return TRUE;
+ }
+ 
++struct _CogDrmExportableOwner {
++    CogDrmPlatform *platform;
++    CogDrmRenderer *renderer;
++    struct wpe_view_backend_exportable_fdo *exportable;
++};
++
++static void
++cog_drm_exportable_owner_stop(CogDrmExportableOwner *owner)
++{
++    if (!owner->renderer)
++        return;
++    if (owner->renderer->stop_exportable)
++        owner->renderer->stop_exportable(owner->renderer);
++    owner->renderer = NULL;
++}
++
++static void
++cog_drm_exportable_owner_destroy(gpointer data)
++{
++    CogDrmExportableOwner *owner = data;
++    cog_drm_exportable_owner_stop(owner);
++    if (owner->platform)
++        owner->platform->export_owner = NULL;
++    wpe_view_backend_exportable_fdo_destroy(owner->exportable);
++    g_free(owner);
++}
++
+ static void
+ cog_drm_platform_finalize(GObject *object)
+ {
+@@ -1507,6 +1537,11 @@ cog_drm_platform_finalize(GObject *object)
+ 
+     g_idle_remove_by_data(&wpe_view_data);
+ 
++    if (self->export_owner) {
++        cog_drm_exportable_owner_stop(self->export_owner);
++        self->export_owner->platform = NULL;
++        self->export_owner = NULL;
++    }
+     g_clear_pointer(&self->renderer, cog_drm_renderer_destroy);
+ 
+     clear_glib();
+@@ -1531,10 +1566,17 @@ cog_drm_platform_get_view_backend(CogPlatform *platform, WebKitWebView *related_
+     wpe_view_data.backend = wpe_view_backend_exportable_fdo_get_view_backend (wpe_host_data.exportable);
+     g_assert (wpe_view_data.backend);
+ 
++    CogDrmExportableOwner *owner = g_new0(CogDrmExportableOwner, 1);
++    *owner = (CogDrmExportableOwner){
++        .platform = self,
++        .renderer = self->renderer,
++        .exportable = wpe_host_data.exportable,
++    };
++    self->export_owner = owner;
+     WebKitWebViewBackend *wk_view_backend =
+         webkit_web_view_backend_new (wpe_view_data.backend,
+-                                     (GDestroyNotify) wpe_view_backend_exportable_fdo_destroy,
+-                                     wpe_host_data.exportable);
++                                     cog_drm_exportable_owner_destroy,
++                                     owner);
+     g_assert (wk_view_backend);
+ 
+     return wk_view_backend;
