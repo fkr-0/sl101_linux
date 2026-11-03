@@ -1,0 +1,39 @@
+schema: sl101-resource-export-candidate/v1
+status: held-for-independent-review
+ocp_task: SL101-LINUX-02-RESOURCE-EXPORT-REVIEW-AND-PACKAGING-20261103-BAAC66
+native_packet: 30ea5045-c8ce-46c4-bf80-e04d02accb8b
+target: nura-106
+other_target_not_equivalent: debian-100
+input:
+  mesa_version: "25.0.7"
+  observed_already_patched_grate_resource_c_sha256: 29ce187ee60118142da4ff42e91c6b6ae2fb35ab2c9dc9e730c7c11a37fafb7e
+  observed_grate_resource_h_sha256: 37925080f0fb378f8414e02970078f2bffa5f09ef62f6e142feb7a3cfb9722a0
+  original_resource_patch:
+    path: patches/mesa-25.0.7/0038-grate-resource-get-param-linear-modifier.patch
+    sha256: ad257d04999bd72a6403e2585e02516d213bccb56bb49e92bea2097121635153
+  distinct_stencil_patch_untouched:
+    path: patches/mesa-25.0.7/0038-grate-stencil-state-fbl04.patch
+    sha256: 2f1a94791011b148cae01201447a0ba54fdb97b9b5c7fa77b261cf21b924d6e1
+candidate:
+  path: patches/grate-resource-export/0001-grate-linear-export-fail-closed.patch
+  sha256: f2b9666908de7370296e4a81757d4b611effe01f4172ad3f1c45b4384a48283d
+  application: "after original resource_get_param patch on exactly matching source"
+candidate_order_only:
+  - "original 0038 resource callback (retain original filename until series owner resolves)"
+  - "resource export 0001 follow-on"
+  - "stencil original 0038 separately; integration owner chooses noncolliding order"
+verification:
+  compiled_callback_and_handle_export: pass
+  strict_correction_patch_apply_reverse: pass
+  original_0038_clean_tree_replay: unverified
+  make_test: "244 tests passed"
+  make_check: pass
+  off_device_armhf_cross_build: not_run
+  independent_review: pending
+  hardware: not_run
+  deployed_build_provenance: unverified
+restrictions:
+  - no_live_mutation
+  - no_shared_mesa_generated_tree_edits
+  - no_default_promotion
+  - no_public_upstream_submission

@@ -1,0 +1,63 @@
+--- a/src/gallium/drivers/grate/grate_resource.h
++++ b/src/gallium/drivers/grate/grate_resource.h
+@@ -13,6 +13,8 @@
+    struct drm_tegra_bo *bo;
+    unsigned int pitch;
+    unsigned int tiled : 1;
++   uint64_t import_modifier; /* Imported layout must not be inferred. */
++   bool imported;
+    unsigned int format : 5;
+ };
+ 
+--- a/src/gallium/drivers/grate/grate_resource.c
++++ b/src/gallium/drivers/grate/grate_resource.c
+@@ -41,6 +41,10 @@
+ {
+    struct grate_resource *resource = grate_resource(presource);
+    int err;
++
++   if (resource->tiled || (resource->imported &&
++       resource->import_modifier != DRM_FORMAT_MOD_LINEAR))
++      return false;
+ 
+    (void)pscreen;
+    (void)pcontext;
+@@ -93,7 +97,15 @@
+    struct grate_resource *resource = grate_resource(presource);
+    struct winsys_handle whandle;
+ 
+-   if (plane != 0 || layer != 0 || level != 0)
++   if (!value || !presource || !resource->bo ||
++       plane != 0 || layer != 0 || level != 0 ||
++       presource->target == PIPE_BUFFER || presource->depth0 != 1 ||
++       presource->array_size != 1 || presource->last_level != 0 ||
++       !presource->height0 || !resource->pitch ||
++       util_format_get_num_planes(presource->format) != 1 ||
++       resource->tiled)
++      return false;
++   if (resource->imported && resource->import_modifier != DRM_FORMAT_MOD_LINEAR)
+       return false;
+ 
+    switch (param) {
+@@ -107,10 +119,10 @@
+       *value = 0;
+       return true;
+    case PIPE_RESOURCE_PARAM_LAYER_STRIDE:
+-      *value = resource->pitch * presource->height0;
++      *value = (uint64_t)resource->pitch * presource->height0;
+       return true;
+    case PIPE_RESOURCE_PARAM_MODIFIER:
+-      *value = resource->tiled ? DRM_FORMAT_MOD_INVALID : DRM_FORMAT_MOD_LINEAR;
++      *value = DRM_FORMAT_MOD_LINEAR;
+       return true;
+    case PIPE_RESOURCE_PARAM_HANDLE_TYPE_SHARED:
+    case PIPE_RESOURCE_PARAM_HANDLE_TYPE_KMS:
+@@ -367,6 +379,8 @@
+       }
+    }
+ 
++   resource->imported = true;
++   resource->import_modifier = handle->modifier;
+    resource->pitch = handle->stride;
+ 
+    format = grate_pixel_format(template->format);
