@@ -134,6 +134,22 @@ class ChrootMesaLane06Tests(unittest.TestCase):
             self.assertIn("--apply disabled", result.stderr)
             self.assertFalse(sentinel.exists(), "apply attempted remote operation")
 
+    def test_deployer_executable_and_no_apply_gate(self):
+        script = ROOT / "scripts/sl101-chroot-mesa-deploy.sh"
+        self.assertTrue(script.stat().st_mode & 0o111, "deploy script must remain executable")
+        result = subprocess.run([str(script), "--apply"], capture_output=True,
+                                text=True, timeout=10)
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertIn("--apply disabled", result.stderr)
+
+    def test_build_is_offline_and_bounded(self):
+        recipe = (ROOT / "build/mesa-grate-clean/build.sh").read_text()
+        self.assertIn("--wrap-mode=nodownload", recipe)
+        self.assertIn("refusing network download", recipe)
+        self.assertNotIn("wget ", recipe)
+        self.assertNotIn("-j$(nproc)", recipe)
+        self.assertIn("ninja -C builddir -j2", recipe)
+
     def test_shell_syntax(self):
         for file, shell in (
             (ROOT / "build/mesa-grate-clean/build.sh", "sh"),

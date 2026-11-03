@@ -14,7 +14,8 @@ MANIFEST=
 HANDOFF=
 APPLY=0
 usage() {
-    echo "Usage: $0 --manifest FILE --expected-cid HEX [--cid-device mmcblkN] [--target user@HOST] [--handoff-file FILE --apply]" >&2
+    echo "Usage (read-only): $0 --manifest FILE --expected-cid HEX [--cid-device mmcblkN] [--target user@HOST]" >&2
+    echo "--apply is intentionally disabled pending native owner/target and atomic rollback qualification" >&2
 }
 while (($#)); do
     case "$1" in

@@ -17,7 +17,6 @@
 set -eu
 
 MESA_VERSION=25.0.7
-MESA_URL="https://archive.mesa3d.org/mesa-${MESA_VERSION}.tar.xz"
 GRATE_DRIVER=/src-production/grate-src
 GRATE_WINSYS=/src-grate/build-pseq-final/mesa-${MESA_VERSION}/src/gallium/winsys/grate
 GRATE_BUILD_SYSTEM=/src-build-system
@@ -39,7 +38,8 @@ if [ -d "/build/grate-libdrm" ]; then
     cd /build/grate-libdrm
     # Discover available meson options for this fork
     meson setup builddir \
-        --cross-file=/build/armhf-cross.ini \
+        --wrap-mode=nodownload \
+    --cross-file=/build/armhf-cross.ini \
         --prefix=/usr \
         --libdir=lib/arm-linux-gnueabihf \
         -Dbuildtype=release \
@@ -50,7 +50,7 @@ if [ -d "/build/grate-libdrm" ]; then
         -Dcairo-tests=false -Dman-pages=false -Dvalgrind=false \
         -Dinstall-test-programs=false 2>&1
     if [ -d builddir ]; then
-        ninja -C builddir -j$(nproc) 2>&1
+        ninja -C builddir -j2 2>&1
         # Find and install the tegra library and headers
         tegra_lib=$(find builddir -name "libdrm_tegra.so*" -not -type l | head -1)
         if [ -n "$tegra_lib" ]; then
@@ -92,7 +92,7 @@ TEGRPC
             echo "ERROR: libdrm dmabuf-seek patch is neither applicable nor present" >&2
             exit 1
         fi
-        ninja -C builddir -j$(nproc) 2>&1
+        ninja -C builddir -j2 2>&1
         tegra_lib=$(find builddir -name "libdrm_tegra.so*" -not -type l | head -1)
         if [ -n "$tegra_lib" ]; then
             cp "$tegra_lib" /usr/lib/arm-linux-gnueabihf/libdrm_tegra.so.0.0.0
@@ -109,10 +109,11 @@ else
     fi
 fi
 
-echo "=== Downloading Mesa ${MESA_VERSION} ==="
+echo "=== Verifying pre-staged Mesa ${MESA_VERSION} ==="
 cd /build
 if [ ! -f "mesa-${MESA_VERSION}.tar.xz" ]; then
-    wget -q "$MESA_URL"
+    echo "ERROR: pinned Mesa archive missing; refusing network download" >&2
+    exit 1
 fi
 # Input provenance is pinned to the reference snapshots captured 2026-11-03.
 # Fail before deleting source if any external input has drifted.
@@ -209,6 +210,7 @@ STUBPC
 
 echo "=== Configuring Meson build ==="
 meson setup builddir \
+    --wrap-mode=nodownload \
     --cross-file=/build/armhf-cross.ini \
     --prefix="$PREFIX" \
     --libdir=lib/arm-linux-gnueabihf \
@@ -231,11 +233,11 @@ meson setup builddir \
     -Dxmlconfig=disabled
 
 echo "=== Building ==="
-ninja -C builddir -j$(nproc)
+ninja -C builddir -j2
 
 echo "=== Installing to $OUTPUT ==="
 rm -rf "$OUTPUT"
-DESTDIR="$OUTPUT" ninja -C builddir install
+DESTDIR="$OUTPUT" ninja -C builddir -j2 install
 
 # Re-copy libdrm_tegra into output (rm -rf $OUTPUT above erased the early copy)
 tegra_lib=$(find /build/grate-libdrm/builddir -name "libdrm_tegra.so*" -not -type l 2>/dev/null | head -1)
