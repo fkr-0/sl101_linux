@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import resource
 from pathlib import Path
 import shlex
 import shutil
@@ -25,7 +26,7 @@ def require_hash(path, digest):
         raise RuntimeError(f"SHA-256 mismatch: {path}: {actual} != {digest}")
 
 
-def qualify(build):
+def qualify(build, assertion_canary=False):
     m = json.loads(MANIFEST.read_text())
     for relative, digest in m["inputs"].items():
         require_hash(ROOT / relative, digest)
@@ -62,9 +63,16 @@ def qualify(build):
                 del args[i:i + (1 if flag in ("-MD", "-c") else 2)]
         args = [v for v in args if v != "../src/gallium/drivers/grate/fp/tgsi.c"]
         binary = stage / "native-lowering"
+        # A release Mesa build may inherit -DNDEBUG; override it after all flags.
+        args.append("-UNDEBUG")
+        if assertion_canary:
+            args.append("-DSL101_FBL03_ASSERTION_CANARY=1")
         args.extend(["-Wl,--gc-sections", "-o", str(binary), str(fp / "test_dp2.c")])
         subprocess.run(args, cwd=build, check=True)
-        subprocess.run([str(binary)], check=True)
+        # The deliberately aborting canary must not leave a host core dump.
+        def disable_core_dumps():
+            resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+        subprocess.run([str(binary)], check=True, preexec_fn=disable_core_dumps)
 
 
 if __name__ == "__main__":
@@ -73,9 +81,11 @@ if __name__ == "__main__":
                         default=Path(os.environ.get("SL101_FBL03_MESA_BUILD",
                                                  ROOT / "build/mesa-grate-clean/mesa-25.0.7/builddir")),
                         help="existing configured Mesa Grate build directory; required for includes")
+    parser.add_argument("--assertion-canary", action="store_true",
+                        help="negative regression: deliberately fail a native assertion")
     a = parser.parse_args()
     try:
-        qualify(a.mesa_build.resolve())
+        qualify(a.mesa_build.resolve(), assertion_canary=a.assertion_canary)
     except (OSError, subprocess.CalledProcessError, RuntimeError, ValueError) as exc:
         print(f"FAIL: FBL03 native qualification: {exc}", file=sys.stderr)
         sys.exit(1)

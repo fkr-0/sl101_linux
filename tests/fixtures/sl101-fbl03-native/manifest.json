@@ -14,6 +14,6 @@
     "tests/fixtures/sl101-fbl03-native/fpir.h": "36e190f6e41c5910168c66a8b7cd6971187cbc0b91e41cd63e8d0852df9b9599",
     "patches/mesa-25.0.7/0012-grate-fp-frc-dp3-dp4.patch": "069e06e2749997afe2cda662a666ae1e3f9435ea31d7f4ef94177bbdfff8f52f",
     "patches/mesa-25.0.7/0037-grate-fp-dp2.patch": "78bc63f2a62adf36c6de1faab68d9e6b2fe82b4083dc0246c0fe5a72766d53da",
-    "tests/fixtures/sl101-fbl03-native/test_dp2.c": "31cbd8258a6d7b6974f22b114d194f6ae45a8322f3da4ca207b6e1c4d5368dab"
+    "tests/fixtures/sl101-fbl03-native/test_dp2.c": "ae23f7bda1e6db544ab3c063a44ca77ca72d81dc8a7c1424762209808a5a85ad"
   }
 }

@@ -3,6 +3,10 @@
 #include <assert.h>
 #include <stdio.h>
 
+#ifdef NDEBUG
+#error "FBL03 native qualification requires assert() enabled"
+#endif
+
 bool
 grate_fp_try_encode_fp20(float value, uint32_t *encoded)
 {
@@ -300,6 +304,9 @@ static void test_dp2_absolute_and_empty_mask(void)
 int
 main(void)
 {
+#ifdef SL101_FBL03_ASSERTION_CANARY
+   assert(!"intentional FBL03 assertion canary must terminate nonzero");
+#endif
    test_dp2_absolute_and_empty_mask();
    test_dp2_two_components_and_writemask();
    test_dp2_swizzle_and_negative();
