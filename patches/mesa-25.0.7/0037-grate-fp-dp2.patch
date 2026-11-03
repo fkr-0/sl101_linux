@@ -1,0 +1,31 @@
+--- a/src/gallium/drivers/grate/fp/tgsi.c
++++ b/src/gallium/drivers/grate/fp/tgsi.c
+@@ -1200,10 +1200,18 @@
+ static bool
+ fp_emit_dp3(struct grate_fp_shader *fp,
+             struct fp_lowering_state *lowering,
+             const struct tgsi_full_instruction *tgsi_inst)
+ {
+    return fp_emit_dot(fp, lowering, tgsi_inst, 3);
+ }
++
++static bool
++fp_emit_dp2(struct grate_fp_shader *fp,
++            struct fp_lowering_state *lowering,
++            const struct tgsi_full_instruction *tgsi_inst)
++{
++   return fp_emit_dot(fp, lowering, tgsi_inst, 2);
++}
+ 
+ static bool
+ fp_emit_dp4(struct grate_fp_shader *fp,
+@@ -1610,6 +1618,9 @@
+             case TGSI_OPCODE_FRC:
+                fp_emit_frc(fp, &lowering, inst);
+                break;
++            case TGSI_OPCODE_DP2:
++               fp_emit_dp2(fp, &lowering, inst);
++               break;
+             case TGSI_OPCODE_DP3:
+                fp_emit_dp3(fp, &lowering, inst);
+                break;
