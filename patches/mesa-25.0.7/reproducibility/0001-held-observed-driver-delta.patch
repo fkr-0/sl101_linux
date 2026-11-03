@@ -1,0 +1,515 @@
+--- a/src/gallium/drivers/grate/fp/fpir.h
++++ b/src/gallium/drivers/grate/fp/fpir.h
+@@ -16,8 +16,6 @@
+ #define FP_LOWP_CONST_REG 31
+ #define FP_UNIFORM_BASE 32
+ #define FP_UNIFORM_COUNT 32
+-/* Grate fragment ISA: ALU destination register 76 drops a fragment on nonzero. */
+-#define FP_KILL_REG 76
+ 
+ enum fp_alu_op {
+    FP_ALU_OP_MAD = 0,
+--- a/src/gallium/drivers/grate/fp/tgsi.c
++++ b/src/gallium/drivers/grate/fp/tgsi.c
+@@ -861,149 +861,6 @@
+    return true;
+ }
+ 
+-/*
+- * Tegra20 discards through ALU destination register 76, not a PSEQ opcode.
+- * Grate's upstream assembler and shaders use "MAD kill" in an ordinary
+- * ALU-scheduled EXEC.  Repeated writes are sticky: zero cannot resurrect.
+- *
+- * Each KILL_IF component is emitted in its own EXEC.  This avoids relying on
+- * ordering of four writes to the same destination within one ALU packet.
+- * A GT comparison against zero implements TGSI's any-component < 0 rule;
+- * in particular, zero (including signed zero) does not discard.
+- */
+-static bool
+-fp_emit_kill(struct grate_fp_shader *fp,
+-             struct fp_lowering_state *lowering,
+-             const struct tgsi_full_instruction *tgsi)
+-{
+-   const bool conditional = tgsi->Instruction.Opcode == TGSI_OPCODE_KILL_IF;
+-   const unsigned expected_sources = conditional ? 1 : 0;
+-
+-   if (tgsi->Instruction.NumSrcRegs != expected_sources ||
+-       tgsi->Instruction.NumDstRegs != 0)
+-      return fp_fail(fp, "invalid TGSI KILL operand count");
+-
+-   /*
+-    * An earlier DW store is already visible and cannot be undone by KILL.
+-    * Reject rather than quietly delivering a color/depth/stencil side effect.
+-    */
+-   if (fp->info.pseq_to_dw_exec_nb != 0)
+-      return fp_fail(fp, "fragment KILL after destination write is unsupported");
+-
+-   if (conditional && tgsi->Src[0].Register.Absolute)
+-      return fp_fail(fp, "fragment KILL_IF with absolute source is unverified");
+-
+-   for (unsigned component = 0; component < (conditional ? 4u : 1u);
+-        ++component) {
+-      if (list_length(&fp->fp_instructions) >= 63 ||
+-          list_length(&fp->alu_instructions) >= 63)
+-         return fp_fail(fp, "fragment KILL exceeds PSEQ/ALU scheduling limits");
+-
+-      struct fp_instr *inst = CALLOC_STRUCT(fp_instr);
+-      struct fp_alu_instr_packet *alu = CALLOC_STRUCT(fp_alu_instr_packet);
+-      struct fp_mfu_instr *mfu = CALLOC_STRUCT(fp_mfu_instr);
+-      if (!inst || !alu || !mfu) {
+-         FREE(inst);
+-         FREE(alu);
+-         FREE(mfu);
+-         return fp_fail(fp, "out of memory lowering fragment KILL");
+-      }
+-
+-      list_inithead(&inst->link);
+-      list_inithead(&alu->link);
+-      list_inithead(&mfu->link);
+-
+-      struct fp_alu_src_operand source = fp_src_one();
+-      bool uses_mfu = false;
+-      int varying_rows[4] = { -1, -1, -1, -1 };
+-      int tex_temp_index = -1;
+-
+-      if (conditional) {
+-         if (!fp_src_component(fp, lowering, alu, mfu, varying_rows,
+-                               &tgsi->Src[0].Register, component, &source,
+-                               &uses_mfu, &tex_temp_index))
+-            goto fail_packet;
+-
+-         if (tex_temp_index >= 0) {
+-            /*
+-             * Deferred TEX lives only within its producing EXEC.  Fuse a
+-             * re-sample with the ALU kill, as the normal ALU lowerer does.
+-             */
+-            const struct fp_pending_tex *pending =
+-               &lowering->pending_tex[tex_temp_index];
+-            if (!pending->valid ||
+-                pending->coord.File != TGSI_FILE_INPUT ||
+-                pending->sampler_index >= 16) {
+-               fp_fail(fp, "invalid deferred fragment KILL texture");
+-               goto fail_packet;
+-            }
+-
+-            for (unsigned c = 0; c < 2; ++c) {
+-               if (varying_rows[c] >= 0 &&
+-                   varying_rows[c] != (int)pending->coord.Index) {
+-                  fp_fail(fp, "KILL texture coordinate conflicts with varying");
+-                  goto fail_packet;
+-               }
+-               varying_rows[c] = pending->coord.Index;
+-               mfu->var[c].op = FP_VAR_OP_FP20;
+-               mfu->var[c].tram_row = pending->coord.Index;
+-            }
+-            if ((int)pending->coord.Index + 1 > fp->info.max_tram_row)
+-               fp->info.max_tram_row = pending->coord.Index + 1;
+-
+-            uses_mfu = true;
+-            inst->tex.enable = true;
+-            inst->tex.sampler_index = pending->sampler_index;
+-            inst->tex.src_regs_select = 0;
+-            inst->tex.sample_dst_regs_select = 0;
+-         }
+-
+-         /*
+-          * FP_CONDITION_GREATER tests the ALU result against zero.
+-          * Negate the already-modified TGSI component to detect src < 0.
+-          */
+-         source.negate = !source.negate;
+-      }
+-
+-      const struct fp_alu_dst_operand kill_dst = {
+-         .index = FP_KILL_REG,
+-         .write_low_sub_reg = true,
+-         .write_high_sub_reg = true,
+-      };
+-      alu->slots[0] = fp_make_mov(kill_dst, source);
+-      if (conditional)
+-         alu->slots[0].condition = FP_CONDITION_GREATER;
+-
+-      inst->alu_sched.num_instructions = 1;
+-      inst->alu_sched.address = list_length(&fp->alu_instructions);
+-      inst->alu_complement = alu->complement;
+-
+-      if (uses_mfu) {
+-         if (list_length(&fp->mfu_instructions) >= 63) {
+-            fp_fail(fp, "fragment KILL exceeds MFU scheduling limits");
+-            goto fail_packet;
+-         }
+-         inst->mfu_sched.num_instructions = 1;
+-         inst->mfu_sched.address = list_length(&fp->mfu_instructions);
+-         list_addtail(&mfu->link, &fp->mfu_instructions);
+-      } else {
+-         FREE(mfu);
+-      }
+-
+-      list_addtail(&alu->link, &fp->alu_instructions);
+-      list_addtail(&inst->link, &fp->fp_instructions);
+-      continue;
+-
+-fail_packet:
+-      FREE(mfu);
+-      FREE(alu);
+-      FREE(inst);
+-      return false;
+-   }
+-
+-   return true;
+-}
+-
+ static bool
+ fp_emit_tex(struct grate_fp_shader *fp,
+             struct fp_lowering_state *lowering,
+@@ -1364,9 +1221,6 @@
+ 
+          if (opcode == TGSI_OPCODE_TEX)
+             fp_emit_tex(fp, &lowering, inst);
+-         else if (opcode == TGSI_OPCODE_KILL ||
+-                  opcode == TGSI_OPCODE_KILL_IF)
+-            fp_emit_kill(fp, &lowering, inst);
+          else if (opcode == TGSI_OPCODE_RCP)
+             fp_emit_sfu(fp, &lowering, inst, FP_SFU_OP_RCP);
+          else if (opcode == TGSI_OPCODE_RSQ)
+--- a/src/gallium/drivers/grate/grate_draw.c
++++ b/src/gallium/drivers/grate/grate_draw.c
+@@ -199,14 +199,6 @@
+     */
+    local_info.take_index_buffer_ownership = false;
+ 
+-   /* Stencil mutation needs an unproven write-mask register. Never submit
+-    * even the first draw in a multi-draw when this state is unsupported.
+-    */
+-   if (!grate_stencil_draw_supported(grate_context(pcontext))) {
+-      fprintf(stderr, "grate: stencil write/attachment state unqualified; draw rejected\n");
+-      goto cleanup;
+-   }
+-
+    if (indirect) {
+       unimplemented();
+       goto cleanup;
+--- a/src/gallium/drivers/grate/grate_resource.c
++++ b/src/gallium/drivers/grate/grate_resource.c
+@@ -236,17 +236,13 @@
+       if (template->bind & PIPE_BIND_DEPTH_STENCIL)
+          resource->pitch = align(resource->pitch, 256);
+       else
+-         resource->pitch = align(resource->pitch, 32);
++         resource->pitch = align(resource->pitch, 64);
+ 
+       flags = DRM_TEGRA_GEM_CREATE_BOTTOM_UP;
+    } else if (template->bind & PIPE_BIND_SAMPLER_VIEW) {
+-      /*
+-       * Tegra20's linear texture descriptor carries no explicit row pitch.
+-       * Hardware derives the row stride from width with 16-byte alignment;
+-       * using the historical 64-byte alignment over-pads small textures and
+-       * makes rows after the first sample from the wrong address.
+-       */
+-      resource->pitch = align(resource->pitch, 16);
++      /* Tegra20 linear texture descriptors carry no explicit row pitch;
++       * hardware derives the stride from width at 64-byte alignment. */
++      resource->pitch = align(resource->pitch, 64);
+       flags = DRM_TEGRA_GEM_CREATE_BOTTOM_UP;
+    }
+ 
+@@ -506,28 +502,6 @@
+    return 0;
+ }
+ 
+-/*
+- * This backend currently maps only disjoint depth-only Z16 and stencil-only
+- * S8 storage.  Clear only the component that actually exists in the bound
+- * surface.  Never treat a partial clear of a future packed format as a full
+- * GR2D fill: preserving the other component needs a proven hardware mask or
+- * a synchronized read/modify/write path.
+- */
+-static unsigned
+-grate_clear_components(enum pipe_format format, unsigned requested)
+-{
+-   switch (format) {
+-   case PIPE_FORMAT_Z16_UNORM:
+-      return requested & PIPE_CLEAR_DEPTH;
+-   case PIPE_FORMAT_S8_UINT:
+-      return requested & PIPE_CLEAR_STENCIL;
+-   default:
+-      fprintf(stderr, "grate: unsupported depth/stencil clear format %u\n",
+-              (unsigned)format);
+-      return 0;
+-   }
+-}
+-
+ static void
+ grate_clear(struct pipe_context *pcontext, unsigned int buffers,
+             const struct pipe_scissor_state *scissor_state,
+@@ -569,8 +543,8 @@
+          height = MIN2(scissor_state->maxy, dst->height) - y;
+       }
+ 
+-      /* Only clear the component physically present in this surface. */
+-      if (grate_clear_components(dst->format, buffers) && width && height &&
++      /* TODO: preserve untouched depth/stencil component for partial clears. */
++      if (width && height &&
+           fill(context->gr2d, grate_resource(dst->texture),
+                util_pack_z_stencil(dst->format, depth, stencil),
+                util_format_get_blocksize(dst->format),
+@@ -604,9 +578,6 @@
+                           bool render_condition_enabled)
+ {
+    assert(!render_condition_enabled);
+-   if (!grate_clear_components(dst->format, clear_flags))
+-      return;
+-
+    fill(grate_context(pipe)->gr2d, grate_resource(dst->texture),
+         util_pack_z_stencil(dst->format, depth, stencil),
+         util_format_get_blocksize(dst->format),
+--- a/src/gallium/drivers/grate/grate_screen.c
++++ b/src/gallium/drivers/grate/grate_screen.c
+@@ -5,7 +5,6 @@
+ #include <limits.h>
+ #include <stdio.h>
+ 
+-#include "compiler/nir/nir.h"
+ #include "util/u_memory.h"
+ #include "util/u_inlines.h"
+ #include "util/u_screen.h"
+@@ -33,38 +32,6 @@
+ DEBUG_GET_ONCE_FLAGS_OPTION(grate_debug, "GRATE_DEBUG", debug_options, 0)
+ uint32_t grate_debug;
+ 
+-/*
+- * GR3D FP has no validated dynamic program-counter branch.  VP defines a
+- * scalar BRA opcode, but its target/condition encoding is not qualified.
+- *
+- * Mesa's nir_to_tgsi optimizer sees MAX_CONTROL_FLOW_DEPTH == 0 below:
+- * it uses nir_opt_peephole_select to flatten *safe* IFs, and runs
+- * nir_opt_loop_unroll.  Give the NIR compiler a finite unroll budget so
+- * statically bounded ESSL 1.00 loops can use that path (including nesting).
+- *
+- * A conditional texture access, discard, or dynamic/unbounded loop cannot
+- * be blindly flattened.  Anything still emitted as TGSI IF/BGNLOOP is
+- * deliberately rejected by the existing VP/FP opcode dispatchers.
+- */
+-static const struct nir_shader_compiler_options grate_nir_options = {
+-   .max_unroll_iterations = 32,
+-   .max_unroll_iterations_aggressive = 32,
+-   .no_integers = true,
+-};
+-
+-static const void *
+-grate_screen_get_compiler_options(struct pipe_screen *pscreen,
+-                                  enum pipe_shader_ir ir,
+-                                  enum pipe_shader_type shader)
+-{
+-   (void)pscreen;
+-   if (ir != PIPE_SHADER_IR_NIR ||
+-       (shader != PIPE_SHADER_VERTEX && shader != PIPE_SHADER_FRAGMENT))
+-      return NULL;
+-
+-   return &grate_nir_options;
+-}
+-
+ static void
+ grate_screen_destroy(struct pipe_screen *pscreen)
+ {
+@@ -487,7 +454,6 @@
+    screen->base.get_vendor = grate_screen_get_vendor;
+    screen->base.get_device_vendor = grate_screen_get_device_vendor;
+    screen->base.get_shader_param = grate_screen_get_shader_param;
+-   screen->base.get_compiler_options = grate_screen_get_compiler_options;
+    screen->base.context_create = grate_screen_context_create;
+    screen->base.is_format_supported = grate_screen_is_format_supported;
+ 
+--- a/src/gallium/drivers/grate/grate_state.c
++++ b/src/gallium/drivers/grate/grate_state.c
+@@ -433,13 +433,8 @@
+       return r == PIPE_SWIZZLE_X && g == PIPE_SWIZZLE_Y &&
+              b == PIPE_SWIZZLE_Z && a == PIPE_SWIZZLE_1;
+    case PIPE_FORMAT_A8_UNORM:
+-      /* Mesa's default view is identity; A8 hardware decode already
+-       * expands to (0,0,0,A). No arbitrary swizzle is implemented.
+-       */
+-      return (r == PIPE_SWIZZLE_0 && g == PIPE_SWIZZLE_0 &&
+-              b == PIPE_SWIZZLE_0 && a == PIPE_SWIZZLE_X) ||
+-             (r == PIPE_SWIZZLE_X && g == PIPE_SWIZZLE_Y &&
+-              b == PIPE_SWIZZLE_Z && a == PIPE_SWIZZLE_W);
++      return r == PIPE_SWIZZLE_0 && g == PIPE_SWIZZLE_0 &&
++             b == PIPE_SWIZZLE_0 && a == PIPE_SWIZZLE_X;
+    case PIPE_FORMAT_L8_UNORM:
+       return r == PIPE_SWIZZLE_X && g == PIPE_SWIZZLE_X &&
+              b == PIPE_SWIZZLE_X && a == PIPE_SWIZZLE_1;
+@@ -480,11 +475,12 @@
+        !grate_check_sampler_swizzle(template->format,
+                                     template->swizzle_r, template->swizzle_g,
+                                     template->swizzle_b, template->swizzle_a))
++      return NULL;
+ 
+    blocksize = util_format_get_blocksize(template->format);
+-   /* T20 derives linear texture row stride at 16-byte alignment. */
++   /* T20 derives linear texture row stride at 64-byte alignment. */
+    if (resource->tiled ||
+-       resource->pitch != align(texture->width0 * blocksize, 16))
++       resource->pitch != align(texture->width0 * blocksize, 64))
+       return NULL;
+ 
+    format = grate_pixel_format(template->format);
+@@ -613,42 +609,11 @@
+    case PIPE_FUNC_LEQUAL: return TGR3D_COMPARE_FUNC_LEQUAL;
+    case PIPE_FUNC_GREATER: return TGR3D_COMPARE_FUNC_GREATER;
+    case PIPE_FUNC_NOTEQUAL: return TGR3D_COMPARE_FUNC_NOTEQUAL;
+-   case PIPE_FUNC_GEQUAL: return TGR3D_COMPARE_FUNC_GEQUAL;
+    case PIPE_FUNC_ALWAYS: return TGR3D_COMPARE_FUNC_ALWAYS;
+    default: unreachable("unknown pipe_compare_func");
+    }
+ }
+ 
+-/* The XML describes compare/ref/ops but not the stencil WRITE MASK.
+- * Until its register semantics are verified, only KEEP may be emitted:
+- * compare and reference are useful, but no stencil contents may change.
+- */
+-static bool
+-grate_stencil_keep_only(const struct pipe_stencil_state *stencil)
+-{
+-   return stencil->fail_op == PIPE_STENCIL_OP_KEEP &&
+-          stencil->zfail_op == PIPE_STENCIL_OP_KEEP &&
+-          stencil->zpass_op == PIPE_STENCIL_OP_KEEP;
+-}
+-
+-bool
+-grate_stencil_draw_supported(const struct grate_context *context)
+-{
+-   const struct pipe_surface *zsbuf = context->framebuffer.base.zsbuf;
+-   const struct grate_zsa_state *zsa = context->zsa;
+-
+-   if (!zsa || !zsa->base.stencil[0].enabled)
+-      return true;
+-   if (zsa->stencil_unsupported)
+-      return false;
+-   /* GLES2 treats the stencil test as disabled without stencil bits. */
+-   if (!zsbuf)
+-      return true;
+-   /* Grate presently has separate S8 and Z16 resources, not packed Z/S. */
+-   return zsbuf->texture->format == PIPE_FORMAT_S8_UINT ||
+-          zsbuf->texture->format == PIPE_FORMAT_Z16_UNORM;
+-}
+-
+ static void *
+ grate_create_zsa_state(struct pipe_context *pcontext,
+                        const struct pipe_depth_stencil_alpha_state *template)
+@@ -658,11 +623,6 @@
+       return NULL;
+ 
+    so->base = *template;
+-   so->stencil_unsupported =
+-      template->stencil[0].enabled &&
+-      (!grate_stencil_keep_only(&template->stencil[0]) ||
+-       (template->stencil[1].enabled &&
+-        !grate_stencil_keep_only(&template->stencil[1])));
+ 
+    uint32_t depth_test = 0;
+    depth_test |= TGR3D_VAL(DEPTH_TEST_PARAMS, FUNC,
+@@ -923,60 +883,11 @@
+    grate_stream_push_words(stream, context->guardband, 4, 0);
+ }
+ 
+-static uint32_t
+-grate_stencil_compare(const struct pipe_stencil_state *s, bool back)
+-{
+-   if (back)
+-      return TGR3D_VAL(STENCIL_BACK1, MASK, s->valuemask) |
+-             TGR3D_VAL(STENCIL_BACK1, FUNC, grate_compare_func(s->func));
+-   return TGR3D_VAL(STENCIL_FRONT1, MASK, s->valuemask) |
+-          TGR3D_VAL(STENCIL_FRONT1, FUNC, grate_compare_func(s->func));
+-}
+-
+-static uint32_t
+-grate_stencil_keep_ref(unsigned reference, bool back)
+-{
+-   /* All three operations are KEEP. The write-mask field is unknown. */
+-   if (back)
+-      return TGR3D_VAL(STENCIL_BACK2, REF, reference) |
+-             TGR3D_VAL(STENCIL_BACK2, OP_FAIL, TGR3D_STENCIL_OP_KEEP) |
+-             TGR3D_VAL(STENCIL_BACK2, OP_ZFAIL, TGR3D_STENCIL_OP_KEEP) |
+-             TGR3D_VAL(STENCIL_BACK2, OP_ZPASS, TGR3D_STENCIL_OP_KEEP);
+-   return TGR3D_VAL(STENCIL_FRONT2, REF, reference) |
+-          TGR3D_VAL(STENCIL_FRONT2, OP_FAIL, TGR3D_STENCIL_OP_KEEP) |
+-          TGR3D_VAL(STENCIL_FRONT2, OP_ZFAIL, TGR3D_STENCIL_OP_KEEP) |
+-          TGR3D_VAL(STENCIL_FRONT2, OP_ZPASS, TGR3D_STENCIL_OP_KEEP);
+-}
+-
+ static void
+ emit_zsa_state(struct grate_context *context)
+ {
+    struct grate_stream *stream = &context->gr3d->stream;
+-   const struct grate_zsa_state *zsa = context->zsa;
+-   const struct pipe_stencil_state *front = &zsa->base.stencil[0];
+-   const struct pipe_stencil_state *back =
+-      zsa->base.stencil[1].enabled ? &zsa->base.stencil[1] : front;
+-   const struct pipe_surface *zsbuf = context->framebuffer.base.zsbuf;
+-   const bool test = front->enabled && zsbuf &&
+-                     zsbuf->texture->format == PIPE_FORMAT_S8_UINT;
+-
+-   grate_stream_push_words(stream, zsa->commands, 2, 0);
+-   /* All five registers are explicit per draw; avoid stale front/back
+-    * state after another context, framebuffer or stencil-ref change.
+-    */
+-   grate_stream_push(stream, host1x_opcode_imm(TGR3D_STENCIL_FRONT1,
+-                  grate_stencil_compare(front, false)));
+-   grate_stream_push(stream, host1x_opcode_imm(TGR3D_STENCIL_BACK1,
+-                  grate_stencil_compare(back, true)));
+-   grate_stream_push(stream, host1x_opcode_imm(TGR3D_STENCIL_PARAMS,
+-                  TGR3D_STENCIL_PARAMS_STENCIL_WRITE_EARLY |
+-                  (test ? TGR3D_STENCIL_PARAMS_STENCIL_TEST : 0)));
+-   grate_stream_push(stream, host1x_opcode_imm(TGR3D_STENCIL_FRONT2,
+-                  grate_stencil_keep_ref(context->stencil_ref.ref_value[0],
+-                                         false)));
+-   grate_stream_push(stream, host1x_opcode_imm(TGR3D_STENCIL_BACK2,
+-                  grate_stencil_keep_ref(context->stencil_ref.ref_value[
+-                                zsa->base.stencil[1].enabled ? 1 : 0], true)));
++   grate_stream_push_words(stream, context->zsa->commands, 2, 0);
+ }
+ 
+ static void
+--- a/src/gallium/drivers/grate/grate_state.h
++++ b/src/gallium/drivers/grate/grate_state.h
+@@ -19,8 +19,6 @@
+ struct grate_zsa_state {
+    struct pipe_depth_stencil_alpha_state base;
+    uint32_t commands[2];
+-   /* Write-mask programming is not yet proven. Disallow mutating ops. */
+-   bool stencil_unsupported;
+ };
+ 
+ struct grate_sampler_state {
+@@ -59,10 +57,6 @@
+    uint16_t mask;
+ };
+ 
+-/* Fail closed before first GR3D command when stencil writes are requested. */
+-bool
+-grate_stencil_draw_supported(const struct grate_context *context);
+-
+ void
+ grate_emit_state(struct grate_context *context);
+ 
+--- a/src/gallium/drivers/grate/grate_texture.h
++++ b/src/gallium/drivers/grate/grate_texture.h
+@@ -111,7 +111,7 @@
+       return false;
+ 
+    const unsigned row_bytes = width * blocksize;
+-   const unsigned expected_pitch = (row_bytes + 15u) & ~15u;
++   const unsigned expected_pitch = (row_bytes + 63u) & ~63u;
+ 
+    return pitch == expected_pitch;
+ }
+--- a/src/gallium/drivers/grate/meson.build
++++ b/src/gallium/drivers/grate/meson.build
+@@ -40,7 +40,7 @@
+     inc_src, inc_include, inc_gallium, inc_gallium_aux,
+     inc_gallium_drivers,
+   ],
+-  dependencies : [dep_libdrm, dep_libdrm_tegra],
++  dependencies : [dep_libdrm, dep_libdrm_tegra, idep_mesautilformat],
+   build_by_default : false,
+ )
+ 

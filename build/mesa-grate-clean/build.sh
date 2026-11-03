@@ -132,6 +132,13 @@ verify_tree "$GRATE_WINSYS" 2483856fad8c143adf238acf2e792346aaabc03002d81d057f04
 [ -f "$EXTRA_PATCHES/series" ] || { echo "ERROR: missing ordered patch series" >&2; exit 1; }
 rm -rf "mesa-${MESA_VERSION}"
 tar xf "mesa-${MESA_VERSION}.tar.xz"
+# Offline wrap cache uses the source hash pinned by Mesa's own .wrap file.
+# This is optional; never fetch protocols over the network.
+if [ -n "${FBL06_WAYLAND_PROTOCOLS_ARCHIVE:-}" ]; then
+    verify_hash "$FBL06_WAYLAND_PROTOCOLS_ARCHIVE" ff17292c05159d2b20ce6cacfe42d7e31a28198fa1429a769b03af7c38581dbe
+    mkdir -p "mesa-${MESA_VERSION}/subprojects/packagecache"
+    cp "$FBL06_WAYLAND_PROTOCOLS_ARCHIVE" "mesa-${MESA_VERSION}/subprojects/packagecache/wayland-protocols-1.38.tar.xz"
+fi
 cd "mesa-${MESA_VERSION}"
 
 echo "=== Applying build system patch (adds grate to Meson) ==="
@@ -159,6 +166,19 @@ while read -r expected filename extra; do
     echo "  $filename"
     patch --batch --fuzz=0 --no-backup-if-mismatch -p1 < "$file" || { echo "ERROR: failed applying $filename" >&2; exit 1; }
 done < "$EXTRA_PATCHES/series"
+
+# Explicit opt-in for reconstructing the frozen *observed* local tree only.
+# Never append this unreviewed integration delta to the production series.
+if [ "${FBL06_EXPERIMENTAL_OBSERVED:-0}" = 1 ]; then
+    held="$EXTRA_PATCHES/reproducibility/0001-held-observed-driver-delta.patch"
+    verify_hash "$held" e6231129776cdc5e4da47fada7cb487395d8ea3c1a25b5b4ab8ab90dab386a89
+    patch --batch --fuzz=0 --no-backup-if-mismatch -p1 < "$held"
+    # The observed snapshot is a local source observation, not known upstream ancestry.
+    actual=$(cd src/gallium/drivers/grate && find . -type f ! -name '*.orig' ! -name '*.rej' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')
+    [ "$actual" = 1520a2aba81033818345299a739cc6a7eb1f1b6ea7b012f37cd93c7aa5a228df ] || {
+        echo 'ERROR: experimental observed source failed byte-manifest verification' >&2; exit 1;
+    }
+fi
 
 echo "=== Verifying drm_helper.h screen_create matches winsys ==="
 # Both build-system patch and winsys use grate_drm_screen_create — no rename needed

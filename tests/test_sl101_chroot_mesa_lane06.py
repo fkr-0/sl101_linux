@@ -150,6 +150,31 @@ class ChrootMesaLane06Tests(unittest.TestCase):
         self.assertNotIn("-j$(nproc)", recipe)
         self.assertIn("ninja -C builddir -j2", recipe)
 
+    def test_held_observed_delta_is_pinned_and_never_in_production_series(self):
+        """An observational integration delta must require explicit opt-in."""
+        held = PATCHES / "reproducibility/0001-held-observed-driver-delta.patch"
+        expected = "e6231129776cdc5e4da47fada7cb487395d8ea3c1a25b5b4ab8ab90dab386a89"
+        self.assertEqual(hashlib.sha256(held.read_bytes()).hexdigest(), expected)
+        self.assertNotIn(held.name, (PATCHES / "series").read_text())
+        recipe = (ROOT / "build/mesa-grate-clean/build.sh").read_text()
+        self.assertIn('FBL06_EXPERIMENTAL_OBSERVED:-0', recipe)
+        self.assertIn(expected, recipe)
+        self.assertIn('patch --batch --fuzz=0 --no-backup-if-mismatch', recipe)
+        self.assertIn('FBL06_WAYLAND_PROTOCOLS_ARCHIVE', recipe)
+        self.assertIn('ff17292c05159d2b20ce6cacfe42d7e31a28198fa1429a769b03af7c38581dbe', recipe)
+
+    def test_held_observed_delta_is_exactly_nine_frozen_paths(self):
+        """Prevent accidental widening of held observational scope."""
+        content = (PATCHES / "reproducibility/0001-held-observed-driver-delta.patch").read_text()
+        paths = [line[6:] for line in content.splitlines() if line.startswith('--- a/')]
+        actual = {p.removeprefix('src/gallium/drivers/grate/') for p in paths}
+        self.assertEqual(actual, {
+            'fp/fpir.h', 'fp/tgsi.c', 'grate_draw.c', 'grate_resource.c',
+            'grate_screen.c', 'grate_state.c', 'grate_state.h',
+            'grate_texture.h', 'meson.build',
+        })
+        self.assertEqual(len(paths), 9)
+
     def test_shell_syntax(self):
         for file, shell in (
             (ROOT / "build/mesa-grate-clean/build.sh", "sh"),

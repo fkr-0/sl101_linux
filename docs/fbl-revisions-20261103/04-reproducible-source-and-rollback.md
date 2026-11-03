@@ -3,7 +3,7 @@
 **2026-11-03 · OCP:** `SL101-LINUX-05-FROZEN-SOURCE-BUILD-20261103-AA7854`
 
 **Native packet:** `39fb32ea-f966-48cc-a02a-cc4eb30437ea` (admitted scope)
-**Status:** **BLOCKED / NO-GO** for full source reconstruction and ARMHF release. This continuation does not amend or reopen original packet `40ef5e18`. Independent review remains required.
+**Status:** frozen observed-source reconstruction and experimental ARMHF Docker build verified in the revision below; **NO-GO** for accepted producer history, device runtime qualification, and ARMHF release/deployment. This continuation does not amend or reopen original packet `40ef5e18`. Independent review remains required.
 
 ## Safety boundaries
 
@@ -64,3 +64,27 @@ Build recipe hardening: all Ninja invocations use `-j2`; missing Mesa archive fa
 4. Obtain mandatory independent code review. Nothing in this report constitutes deployment approval.
 
 Focused adversarial tests and `make test` / `make check` logs are in the private evidence directory.
+
+## Independent review revision — frozen observed-tree experiment (2026-11-03)
+
+Following the independent `request_changes` on commit `41d5743`, a **separate experimental observation target** has been reconstructed. The official `patches/mesa-25.0.7/series` remains unchanged; no patch was accepted as functional/prod-ready.
+
+- The original ten hash-pinned candidate patches replay with `--batch --fuzz=0 --no-backup-if-mismatch` onto a fresh Mesa 25.0.7 extraction, Grate build-system patch and two frozen snapshots.
+- Nine divergent driver paths are represented by a single *held observational delta* at `patches/mesa-25.0.7/reproducibility/0001-held-observed-driver-delta.patch` (SHA-256 `e6231129776cdc5e4da47fada7cb487395d8ea3c1a25b5b4ab8ab90dab386a89`), with its distinct `series.observed-held` inventory. This is a delta from the existing candidate replay to the frozen **local observed snapshot**, not an authored commit history, accepted upstream series or proof of production origin.
+- A fresh zero-fuzz dry-run followed by strict application showed exact file-content and path equality to the frozen observed driver after discarding `grate_screen.c.orig`, a transient patch backup in the temporary candidate tree. The target file manifest is `1520a2aba81033818345299a739cc6a7eb1f1b6ea7b012f37cd93c7aa5a228df`, captured in two identical hash passes earlier in this packet.
+- `build/mesa-grate-clean/build.sh` reconstructs the observed local tree **only with** `FBL06_EXPERIMENTAL_OBSERVED=1`, then checks the full observed manifest. The default never applies this held patch. Pending DP2, locking, modifier, and other unaccepted producers remain out of the canonical production series; the held delta has **no independently verified functional or commit attribution**.
+- The reviewer-provided offline Wayland protocols 1.38 archive matches pinned SHA-256 `ff17292c05159d2b20ce6cacfe42d7e31a28198fa1429a769b03af7c38581dbe`, identical to the Mesa `subprojects/wayland-protocols.wrap` pin. The build script's optional `FBL06_WAYLAND_PROTOCOLS_ARCHIVE` feeds this cache after fresh extraction, with `--wrap-mode=nodownload`. Host build is isolated under `/tmp/sl101-fbl06-isolated-build.*` with `--network none --cpus 2 --memory 4g --memory-swap 6g --pids-limit 256` and `ninja -j2`; no unpinned SDK downloads.
+
+**Safety status remains NO-GO for live installation**: executable mode `100755` is retained; `--apply` is refused before remote access. Local source byte equality does not demonstrate GPU correctness, full runtime closure, or any deployment authorization. See private `evidence/revision-*` files for the build and tests; update exact ELF/link evidence only after the build has exited successfully.
+
+### Completed experimental ARMHF build and static ELF audit
+
+The **second**, idle-timeout-disabled isolated Docker run finished successfully. Build log: `evidence/revision-docker-build-retry.log`; prefix staged only in `/tmp/sl101-fbl06-isolated-build.*/build/output/opt/grate-mesa25-clean`. The first revision run was externally terminated by ws-bridge's idle-output timeout during compilation, not a compile error. No generated build tree in the shared checkout was touched.
+
+Image identity: `sha256:b1cda264467478f78d1e8c58bcde065c3531cbffd70f382c2c84ce07ea619959` (`mesa-grate-build:latest`, local tag; registry provenance not established). Container Debian bookworm ARMHF cross-GCC 12.2.0 with glibc 2.36 and libdrm 2.4.114; `armhf-cross.ini` sha256 `41d73d4552dde8b37a06b5966a9e4d16a539f36825a79d88cd282ebe9e1befaa`. Exact script sha256 `a098366778335c3ae82cf71ec616c5affaa4d54c6ad85c0ba296941f23a59c14` (see evidence). Protocols 1.38 came from the reviewed hash-matching offline tarball, not the image's older 1.31 package.
+
+Six installed ELF regular files were inspected with `readelf -h`, `readelf -A`, `readelf -l`, `readelf -d` and SHA-256 recorded in `evidence/revision-elf-audit.txt`. All are **ELF32 little-endian ARM EABI5 hard-float**, CPU architecture ARMv7, FP architecture **VFPv3-D16**, VFP-register calling convention. No `Tag_Advanced_SIMD_arch` is present; a disassembly grep of the large `libgallium` image found no selected NEON opcode families. This does **not** prove every instruction of every binary has been exhaustively vetted. Outputs are shared libraries so they have no ELF `PT_INTERP`; their `DT_NEEDED` includes `ld-linux-armhf.so.3` in the glibc runtime closure. The experimental image contains `libgallium-25.0.7.so`, `libEGL.so.1.0.0`, `libgbm.so.1.0.0`, `libGLESv2.so.2.0.0`, `libdrm_tegra.so.0.0.0` and `gbm/dri_gbm.so`.
+
+`evidence/revision-dependency-closure.txt` resolves all transitive `DT_NEEDED` dependencies for **17 ELF objects** against the isolated output and container's ARMHF sysroot, with **zero unresolved names** (including `libstdc++.so.6` from `/usr/arm-linux-gnueabihf/lib`). This is *builder-sysroot static closure only*, not proof the SL101 target has the same libc, loader, GLVND/Wayland stack, or correct runtime resolution. No target executables or `PT_INTERP` artifacts were generated. All post-revision tests pass: 10 focused lane06 tests, `make test` 234 tests, `make check` Python compilation; evidence under `evidence/revision-*-final.log`.
+
+**Integration delta/hold:** The nine-file patch is a reproducible local observation, not a reviewed producer commit. It may reverse some later candidate changes because the shared observed tree did not include them. It is intentionally only a distinct opt-in experiment, not a production series update. No DP2/lock/modifier candidate or new driver semantics has been approved here. No deployment/`--apply`/renderer activation is permitted. Independent code review and separately authorized device qualification are required before any promotion.
