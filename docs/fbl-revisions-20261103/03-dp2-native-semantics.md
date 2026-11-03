@@ -1,0 +1,33 @@
+# SL101 Linux FBL03 native DP2 revision — 2026-11-03
+
+OCP follow-up: `SL101-LINUX-03-DP2-NATIVE-SEMANTICS-20261103-9F3EFD`; exact original workflow packet `efeda9fb-85ae-4857-b29f-5d511d22d045` (opportunity `admitted-fd6887e71839252b53f66eea`). Independent review originally returned `request_changes`: the original Python tests only searched patch text and did not execute the compiler lowering.
+
+## Hash-pinned source and patch order
+
+| Input / output | SHA-256 |
+| --- | --- |
+| Current shared Mesa tgsi.c, **not modified** | `946541e9a38878317ab3c04af9997c7b2a6cca828bb78d9f93cbef448f5ac3a8` |
+| Previous lane03 rebased-base.c | `2f5f5ebc6a582fe9205f757fb43b79c1150ba780eb09d534bfd936f3c6ea276f` |
+| 0012-grate-fp-frc-dp3-dp4.patch | `069e06e2749997afe2cda662a666ae1e3f9435ea31d7f4ef94177bbdfff8f52f` |
+| 0037-grate-fp-dp2.patch | `78bc63f2a62adf36c6de1faab68d9e6b2fe82b4083dc0246c0fe5a72766d53da` |
+| Isolated source after strictly applying 0012 then 0037 | `514bfd76e0578c6e5a673f0a218dbe6a63b2db9416ea1b99f62924a1ee024b35` |
+
+Both `git apply --check` and `git apply` succeeded **in order** on the isolated historical rebased source. Attempts against current shared Mesa source failed without any modification; see `work/fbl-revisions-20261103/03-dp2-native-semantics/logs/0012-grate-fp-frc-dp3-dp4.patch.check.log` and `.../0037-grate-fp-dp2.patch.check.log`. This matters for lane06: the patches cannot be replayed blindly onto current build state. Lane06 must own series/build integration and must pin/verify the compatible baseline or rebase explicitly. This revision **does not** modify series or shared build source.
+
+## Host-native lowering coverage
+
+`work/fbl-revisions-20261103/03-dp2-native-semantics/run_native.py` compiles a host-native C executable with Mesa Grate compile definitions and includes, directly including the **actual 0012+0037 patched** `tgsi.c`. The `test_dp2.c` harness invokes native `fp_emit_dp2` and inspects emitted ALU/PSEQ structures. The original FRC/DP3/DP4 tests are retained. Checks include:
+
+- Two independent dot terms, `x*x + y*y` in MUL then MAD order (not a four-component DP4); swizzled operands, negated and absolute source modifiers; explicit reference scalar expectations used as examples, while emitted register selectors/flags are independently asserted.
+- Destination X-only and XY/XYZW writemasks, empty mask, TEMP destination/source overlap with final MOV protection, scratch exhaustion with a closed failure, unsupported two-varying row conflict, and invalid source count.
+- Host runner output: **PASS: 14 grate FRC/DP lowering structural tests**. Final output retained under `logs/native-replay.log`; an intermediate incorrect harness assertion failed during development and was corrected before final verification. This is an executable C lowering regression, **not** an emulator executing the numerical output, full Mesa shader compile/link, or GPU pixel test.
+
+The tracked `tests/test_sl101_fbl03_fp_dp2.py` runs this native harness when the private isolated fixture exists; a checkout without it explicitly skips the native case. Such a skip is **not proof** of lowering. A portable committed fixture/harness is still needed before reproducible CI qualification, requiring a scoped packet amendment if file paths beyond the original ownership are needed.
+
+## Gates and unresolved evidence
+
+- `make test`: 224 tests passed on final rerun (exit 0), including compiled native harness (exit 0), log in private `logs/make-test.log`.
+- `make check`: passed (exit 0), log in `logs/make-check-final.log`. Final test output in `logs/make-test-final.log`.
+- No live device, SSH, compositor/session, GPU raster, or default acceleration changes. The production software-rendered recovery path remains untouched.
+- GPU pixels, Skia Ganesh shader inventory and target compatibility remain **unverified**; no live qualification or deployment is authorized by this revision.
+- Review remains mandatory; no self-approval. Lane06 owns patch-series/build handoff. Record integration baseline and patch hashes above before any downstream work.
