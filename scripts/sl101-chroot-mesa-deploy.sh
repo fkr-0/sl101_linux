@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Lane 06: glibc ARMHF chroot only. No host Mesa or labwc prefix writes.
-# Default is read-only dry-run; --apply additionally needs an explicit lane-01 handoff.
+# Default is read-only dry-run. Apply is deliberately disabled until authenticated
+# native ownership/lease and complete rollback are verified.
 set -euo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 SOURCE="$ROOT/build/mesa-grate-clean/output/opt/grate-mesa25-clean/lib/arm-linux-gnueabihf"
@@ -32,6 +33,13 @@ while (($#)); do
         *) usage; exit 2 ;;
     esac
 done
+# A local text file is not an authoritative ownership/lease record. In particular,
+# arbitrary grep matches MUST NOT authorize remote staging or mutation.
+# Fail before even the read-only SSH identity probe on an attempted apply.
+if (( APPLY )); then
+    echo 'DENIED: --apply disabled pending native lease/owner/target verification and atomic bundle rollback qualification' >&2
+    exit 3
+fi
 [[ -f "$MANIFEST" && -d "$SOURCE" ]] || { echo "Missing source or SHA256 manifest" >&2; exit 1; }
 [[ "$EXPECTED_CID" =~ ^[[:xdigit:]]{32}$ ]] || { echo "Exact 32-character SD CID required" >&2; exit 1; }
 [[ "$CID_DEVICE" =~ ^mmcblk[0-9]+$ ]] || { echo "Invalid SD device" >&2; exit 1; }
@@ -65,61 +73,5 @@ expected=$1 dev=$2 kernel=$3 prefix=$4
 echo "Identity OK: kernel=$kernel, CID=$expected, destination=$prefix"
 REMOTE
 printf 'Validated %d local hashes for chroot-only prefix %s\n' "${#files[@]}" "$PREFIX"
-if (( ! APPLY )); then
-    echo 'Dry-run complete; no device state changed.'
-    exit 0
-fi
-# The operator must supply a durable, explicitly recorded handoff from lane 01.
-[[ -f "$HANDOFF" ]] || { echo "Live lane-01 handoff file required for --apply" >&2; exit 1; }
-grep -Fq 'SL101-LINUX-01-PROMPT-KMS-ATOMIC-EINVAL-20261103-324D9D' "$HANDOFF" &&
-grep -Fq 'lane 06' "$HANDOFF" &&
-grep -Fq 'handoff approved' "$HANDOFF" || { echo "No explicit lane-01 handoff recorded" >&2; exit 1; }
-stamp=$(date -u +%Y%m%dT%H%M%SZ)
-stage=$(ssh -o BatchMode=yes "$TARGET" 'mktemp -d /tmp/sl101-lane06.XXXXXXXX')
-[[ "$stage" =~ ^/tmp/sl101-lane06\.[A-Za-z0-9]+$ ]] || { echo 'Unsafe remote staging path' >&2; exit 1; }
-cleanup() { ssh -o BatchMode=yes "$TARGET" "rm -rf -- '$stage'" || :; }
-trap cleanup EXIT
-tar -C "$SOURCE" -cf - -- "${files[@]}" | ssh -o BatchMode=yes "$TARGET" "tar -C '$stage' -xf -"
-scp -q -- "$MANIFEST" "$TARGET:$stage/manifest"
-# Root-owned transaction. No compositor restart, and no host prefix touched.
-ssh -o BatchMode=yes "$TARGET" sudo -n sh -s -- "$stage" "$stamp" "$EXPECTED_CID" "$CID_DEVICE" "$KERNEL" "$PREFIX" <<'REMOTE'
-set -eu
-stage=$1 stamp=$2 cid=$3 dev=$4 kernel=$5 prefix=$6
-[ "$(uname -r)" = "$kernel" ] && [ "$(cat "/sys/block/$dev/device/cid")" = "$cid" ] || exit 1
-[ "$(readlink -f "$prefix")" = "$prefix" ] || exit 1
-(cd "$stage" && sha256sum -c manifest --status)
-touch "$stage/journal"
-committed=0
-rollback() {
-    if [ "$committed" -ne 1 ]; then
-        while IFS= read -r name; do
-            dest="$prefix/$name"
-            rm -f "$dest.$stamp.tmp"
-            if [ -f "$dest.$stamp.bak" ]; then cp -p "$dest.$stamp.bak" "$dest"; else rm -f "$dest"; fi
-        done < "$stage/journal"
-        echo 'Rollback attempted after failed chroot deployment' >&2
-    fi
-}
-trap rollback 0
-while read -r hash name extra; do
-    case "$hash" in ""|\#*) continue ;; esac
-    case "$name" in
-        libEGL.so.1.0.0|libgallium-25.0.7.so|libGLESv2.so.2.0.0|libgbm.so.1.0.0|libdrm_tegra.so.0.0.0|gbm/dri_gbm.so) ;;
-        *) exit 1 ;;
-    esac
-    dest="$prefix/$name"
-    [ -f "$stage/$name" ] && [ ! -L "$dest" ] || exit 1
-    [ -d "$(dirname "$dest")" ] || exit 1
-    [ "$(readlink -f "$(dirname "$dest")")" = "$(dirname "$dest")" ] || exit 1
-    [ ! -e "$dest.$stamp.bak" ] && [ ! -e "$dest.$stamp.tmp" ] || exit 1
-    if [ -e "$dest" ]; then cp -p "$dest" "$dest.$stamp.bak"; fi
-    printf '%s\n' "$name" >> "$stage/journal"
-    cp "$stage/$name" "$dest.$stamp.tmp"
-    chmod 755 "$dest.$stamp.tmp"
-    mv -f "$dest.$stamp.tmp" "$dest"
-    [ "$(sha256sum "$dest" | cut -d' ' -f1)" = "$hash" ] || exit 1
-done < "$stage/manifest"
-committed=1
-echo "Chroot-only deployment OK; timestamped backups: $stamp"
-REMOTE
-echo 'Browser restart and pixel qualification remain a separate lane-01-authorized action.'
+echo 'Dry-run complete; no device state changed.'
+exit 0

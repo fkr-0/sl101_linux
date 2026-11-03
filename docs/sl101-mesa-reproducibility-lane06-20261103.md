@@ -5,6 +5,12 @@
 **Date:** 2026-11-03  
 **Status:** **Candidate implementation; release/deployment NO-GO pending byte-equivalent replay and independent review.**
 
+## 2026-11-03 revision safety hold (OCP 7F1F5A)
+
+Independent review requested changes. As a bounded fail-closed mitigation, `scripts/sl101-chroot-mesa-deploy.sh` now rejects every `--apply` invocation (exit 3) **before SSH or reading manifest inputs**, regardless of any supplied handoff text. The unverified per-file activation/rollback prototype was removed entirely; a genuine authoritative owner/lease/target check and atomic-set activation or fully verified rollback transaction remain prerequisites to restoring apply. Dry-run remains available with identity checks. A host adversarial test provides a fake matching handoff plus a fake SSH executable and asserts no remote operation occurs.
+
+**Still blocked / no qualification claim:** the immutable intended production source snapshot with before/after hashes, attribution for the nine differing Grate files, zero-fuzz byte-equal replay, clean isolated Docker cross-build and ARM glibc ELF interpreter/DT_NEEDED provenance have not been established. The mutable shared tree and pending lane 01/02/03 patches must not be treated as authoritative production inputs. No production files copied or modified, no live deployment, and no host musl prefix writes. This revision does not claim atomic activation or rollback testing because activation is disabled. A bounded scope amendment is necessary before persisting new frozen source artifacts under work/ or introducing additional patch files, and independent review is still required.
+
 ## Boundaries
 
 This lane owns `patches/mesa-25.0.7/series`, `build/mesa-grate-clean/build.sh`, `scripts/sl101-chroot-mesa-deploy.sh` and its own `tests/test_sl101_chroot_mesa_lane06.py`. It has not touched the live SL101, restarted labwc, written host Mesa's prefix or modified the shared `build/mesa-grate-clean/mesa-25.0.7` tree. Candidate replay was built under `/tmp/sl101-lane06-replay` and is not a deployment source.

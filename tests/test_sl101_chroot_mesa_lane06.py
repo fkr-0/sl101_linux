@@ -113,6 +113,27 @@ class ChrootMesaLane06Tests(unittest.TestCase):
             self.assertFalse(list(root.rglob("*.rej")))
             self.assertFalse(list(root.rglob("*.orig")))
 
+    def test_apply_rejected_before_any_ssh_or_file_access(self):
+        """Untrusted handoff text cannot confer authorization, even with --apply."""
+        script = ROOT / "scripts/sl101-chroot-mesa-deploy.sh"
+        with tempfile.TemporaryDirectory(prefix="sl101-lane06-deny-") as tmp:
+            root = pathlib.Path(tmp)
+            sentinel = root / "ssh-called"
+            fake_ssh = root / "ssh"
+            fake_ssh.write_text("#!/bin/sh\ntouch '" + str(sentinel) + "'\nexit 0\n")
+            fake_ssh.chmod(0o755)
+            handoff = root / "handoff"
+            handoff.write_text("SL101-LINUX-01-PROMPT-KMS-ATOMIC-EINVAL-20261103-324D9D\nlane 06\nhandoff approved\n")
+            import os
+            env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ.get("PATH", ""))
+            result = subprocess.run(["bash", str(script), "--apply", "--handoff-file",
+                                     str(handoff), "--manifest", str(root / "missing"),
+                                     "--expected-cid", "a" * 32],
+                                    env=env, capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 3, result.stderr)
+            self.assertIn("--apply disabled", result.stderr)
+            self.assertFalse(sentinel.exists(), "apply attempted remote operation")
+
     def test_shell_syntax(self):
         for file, shell in (
             (ROOT / "build/mesa-grate-clean/build.sh", "sh"),
