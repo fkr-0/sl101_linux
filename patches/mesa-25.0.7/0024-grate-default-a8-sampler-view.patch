@@ -1,0 +1,30 @@
+From: SL101 Grate bring-up <sl101@localhost>
+Subject: [PATCH 0024] grate: permit default A8 bitmap view as native decode
+
+Apply after 0004-grate-single-channel-sampler-formats.patch.
+Mesa's u_sampler_view_default_template emits identity XYZW for A8,
+and st_cb_bitmap requests that template after choosing A8. Tegra's
+fixed A8 texture format already supplies (0,0,0,alpha), so the
+identity view requires no programmable channel remap. Keep the
+explicit native channel swizzle, and reject every other A8 view.
+This is a source-level contract, not hardware pixel qualification.
+
+diff --git a/src/gallium/drivers/grate/grate_state.c b/src/gallium/drivers/grate/grate_state.c
+--- a/src/gallium/drivers/grate/grate_state.c
++++ b/src/gallium/drivers/grate/grate_state.c
+@@ -433,8 +433,13 @@
+       return r == PIPE_SWIZZLE_X && g == PIPE_SWIZZLE_Y &&
+              b == PIPE_SWIZZLE_Z && a == PIPE_SWIZZLE_1;
+    case PIPE_FORMAT_A8_UNORM:
+-      return r == PIPE_SWIZZLE_0 && g == PIPE_SWIZZLE_0 &&
+-             b == PIPE_SWIZZLE_0 && a == PIPE_SWIZZLE_X;
++      /* Mesa's default view is identity; A8 hardware decode already
++       * expands to (0,0,0,A). No arbitrary swizzle is implemented.
++       */
++      return (r == PIPE_SWIZZLE_0 && g == PIPE_SWIZZLE_0 &&
++              b == PIPE_SWIZZLE_0 && a == PIPE_SWIZZLE_X) ||
++             (r == PIPE_SWIZZLE_X && g == PIPE_SWIZZLE_Y &&
++              b == PIPE_SWIZZLE_Z && a == PIPE_SWIZZLE_W);
+    case PIPE_FORMAT_L8_UNORM:
+       return r == PIPE_SWIZZLE_X && g == PIPE_SWIZZLE_X &&
+              b == PIPE_SWIZZLE_X && a == PIPE_SWIZZLE_1;
