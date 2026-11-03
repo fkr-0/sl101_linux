@@ -1,0 +1,138 @@
+--- a/src/gallium/drivers/grate/grate_state.c
++++ b/src/gallium/drivers/grate/grate_state.c
+@@ -627,6 +627,42 @@
+           stencil->zpass_op == PIPE_STENCIL_OP_KEEP;
+ }
+ 
++/* The pinned Grate source exercises these operations on full S8 writes.
++ * There is no independently documented programmable write-mask register.
++ */
++static bool
++grate_stencil_op_supported(enum pipe_stencil_op op)
++{
++   return op == PIPE_STENCIL_OP_KEEP ||
++          op == PIPE_STENCIL_OP_ZERO ||
++          op == PIPE_STENCIL_OP_REPLACE;
++}
++
++static bool
++grate_stencil_state_supported(const struct pipe_stencil_state *s)
++{
++   if (!s->enabled)
++      return true;
++   if (s->func < PIPE_FUNC_NEVER || s->func > PIPE_FUNC_ALWAYS)
++      return false;
++   if (!grate_stencil_op_supported(s->fail_op) ||
++       !grate_stencil_op_supported(s->zfail_op) ||
++       !grate_stencil_op_supported(s->zpass_op))
++      return false;
++   return grate_stencil_keep_only(s) || s->writemask == 0xff;
++}
++
++static uint32_t
++grate_stencil_op(enum pipe_stencil_op op)
++{
++   switch (op) {
++   case PIPE_STENCIL_OP_KEEP: return TGR3D_STENCIL_OP_KEEP;
++   case PIPE_STENCIL_OP_ZERO: return TGR3D_STENCIL_OP_ZERO;
++   case PIPE_STENCIL_OP_REPLACE: return TGR3D_STENCIL_OP_REPLACE;
++   default: unreachable("unvalidated stencil operation");
++   }
++}
++
+ bool
+ grate_stencil_draw_supported(const struct grate_context *context)
+ {
+@@ -641,8 +677,7 @@
+    if (!zsbuf)
+       return true;
+    /* Grate presently has separate S8 and Z16 resources, not packed Z/S. */
+-   return zsbuf->texture->format == PIPE_FORMAT_S8_UINT ||
+-          zsbuf->texture->format == PIPE_FORMAT_Z16_UNORM;
++   return zsbuf->texture->format == PIPE_FORMAT_S8_UINT;
+ }
+ 
+ static void *
+@@ -655,10 +690,8 @@
+ 
+    so->base = *template;
+    so->stencil_unsupported =
+-      template->stencil[0].enabled &&
+-      (!grate_stencil_keep_only(&template->stencil[0]) ||
+-       (template->stencil[1].enabled &&
+-        !grate_stencil_keep_only(&template->stencil[1])));
++      !grate_stencil_state_supported(&template->stencil[0]) ||
++      !grate_stencil_state_supported(&template->stencil[1]);
+ 
+    uint32_t depth_test = 0;
+    depth_test |= TGR3D_VAL(DEPTH_TEST_PARAMS, FUNC,
+@@ -930,18 +963,23 @@
+ }
+ 
+ static uint32_t
+-grate_stencil_keep_ref(unsigned reference, bool back)
++grate_stencil_ops_ref(const struct pipe_stencil_state *s,
++                      unsigned reference, bool back)
+ {
+-   /* All three operations are KEEP. The write-mask field is unknown. */
++   /* 0x1fe00 is an upstream full-mask reference literal, NOT a
++    * verified programmable partial write-mask encoding.
++    */
+    if (back)
+       return TGR3D_VAL(STENCIL_BACK2, REF, reference) |
+-             TGR3D_VAL(STENCIL_BACK2, OP_FAIL, TGR3D_STENCIL_OP_KEEP) |
+-             TGR3D_VAL(STENCIL_BACK2, OP_ZFAIL, TGR3D_STENCIL_OP_KEEP) |
+-             TGR3D_VAL(STENCIL_BACK2, OP_ZPASS, TGR3D_STENCIL_OP_KEEP);
++             TGR3D_VAL(STENCIL_BACK2, OP_FAIL, grate_stencil_op(s->fail_op)) |
++             TGR3D_VAL(STENCIL_BACK2, OP_ZFAIL, grate_stencil_op(s->zfail_op)) |
++             TGR3D_VAL(STENCIL_BACK2, OP_ZPASS, grate_stencil_op(s->zpass_op)) |
++             0x1fe00u;
+    return TGR3D_VAL(STENCIL_FRONT2, REF, reference) |
+-          TGR3D_VAL(STENCIL_FRONT2, OP_FAIL, TGR3D_STENCIL_OP_KEEP) |
+-          TGR3D_VAL(STENCIL_FRONT2, OP_ZFAIL, TGR3D_STENCIL_OP_KEEP) |
+-          TGR3D_VAL(STENCIL_FRONT2, OP_ZPASS, TGR3D_STENCIL_OP_KEEP);
++          TGR3D_VAL(STENCIL_FRONT2, OP_FAIL, grate_stencil_op(s->fail_op)) |
++          TGR3D_VAL(STENCIL_FRONT2, OP_ZFAIL, grate_stencil_op(s->zfail_op)) |
++          TGR3D_VAL(STENCIL_FRONT2, OP_ZPASS, grate_stencil_op(s->zpass_op)) |
++          0x1fe00u;
+ }
+ 
+ static void
+@@ -957,22 +995,22 @@
+                      zsbuf->texture->format == PIPE_FORMAT_S8_UINT;
+ 
+    grate_stream_push_words(stream, zsa->commands, 2, 0);
+-   /* All five registers are explicit per draw; avoid stale front/back
+-    * state after another context, framebuffer or stencil-ref change.
++   /* Pinned Grate emits two incrementing spans: full 32-bit reference
++    * words DO NOT fit host1x_opcode_imm's 16-bit immediate payload.
++    * Keep early writes off until fragment-discard metadata is available.
+     */
+-   grate_stream_push(stream, host1x_opcode_imm(TGR3D_STENCIL_FRONT1,
+-                  grate_stencil_compare(front, false)));
+-   grate_stream_push(stream, host1x_opcode_imm(TGR3D_STENCIL_BACK1,
+-                  grate_stencil_compare(back, true)));
+-   grate_stream_push(stream, host1x_opcode_imm(TGR3D_STENCIL_PARAMS,
+-                  TGR3D_STENCIL_PARAMS_STENCIL_WRITE_EARLY |
+-                  (test ? TGR3D_STENCIL_PARAMS_STENCIL_TEST : 0)));
+-   grate_stream_push(stream, host1x_opcode_imm(TGR3D_STENCIL_FRONT2,
+-                  grate_stencil_keep_ref(context->stencil_ref.ref_value[0],
+-                                         false)));
+-   grate_stream_push(stream, host1x_opcode_imm(TGR3D_STENCIL_BACK2,
+-                  grate_stencil_keep_ref(context->stencil_ref.ref_value[
+-                                zsa->base.stencil[1].enabled ? 1 : 0], true)));
++   grate_stream_push(stream, host1x_opcode_incr(TGR3D_STENCIL_FRONT1, 3));
++   grate_stream_push(stream, grate_stencil_compare(front, false));
++   grate_stream_push(stream, grate_stencil_compare(back, true));
++   grate_stream_push(stream, 0x8u |
++                     (test ? TGR3D_STENCIL_PARAMS_STENCIL_TEST : 0));
++   grate_stream_push(stream, host1x_opcode_incr(TGR3D_STENCIL_FRONT2, 2));
++   grate_stream_push(stream,
++                     grate_stencil_ops_ref(front, context->stencil_ref.ref_value[0],
++                                           false));
++   grate_stream_push(stream,
++                     grate_stencil_ops_ref(back, context->stencil_ref.ref_value[
++                         zsa->base.stencil[1].enabled ? 1 : 0], true));
+ }
+ 
+ static void
