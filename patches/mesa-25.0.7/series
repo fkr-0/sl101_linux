@@ -1,0 +1,15 @@
+# Mesa 25.0.7 candidate series. NOT yet equivalent to the mutable live tree.
+# Mesa tar SHA256: 592272df3cf01e85e7db300c449df5061092574d099da275d19e97ef0510f8a6
+# Build system patch SHA256: 60c75af505179bb1fd885d55fb6378c02a6cdd60e079f1e0c379003ce3f24551
+# Production grate digest: dd6b385a32425ab2959e61f66462e69d47bea343b6c604aed512748f31b2948e
+# Grate winsys digest: 2483856fad8c143adf238acf2e792346aaabc03002d81d057f04684dbc03e5b1
+47bec4a1a470505c1fb2f39a4d3fa60b772986e16efd93d3c68d92508879e743  0001-egl-dri2-guard-null-pipe_screen-in-dri2_setup_screen.patch
+68164181e782de1f933726552b723c1b078b433f903c87155a07d6486a6a3629  0013-grate-fp-discard-alu-kill.patch
+38ea9ae6591499e0b7730b9f720e397e4ca10d3623783b64e500162a544507c1  0015-grate-gles2-controlflow-lowering.patch
+26790af2ea70b900ad2704e75965d4fc7d09c9300884752736f697bf6d934256  0019-grate-selective-depth-stencil-clear.patch
+06dd031cd59f824806679fb9f70949acb75a96798e9042e79c36ac56c4371c47  0024-grate-default-a8-sampler-view.patch
+6ac229bd20db2c0e2aeb3fcb082810ddd2bc5a884768a6d4cddd5a8cecacbde6  0030-grate-fix-sampler-view-missing-null-guard.patch
+3fc334a8bb82af6b58461a7663f3e407e1ec92b79d5e6f52432f35fba2ee2084  0031-egl-wayland-accept-driver-formats-when-server-bitmap-empty.patch
+cc3597468898c7770e8a6a2a3793135b5ed59d18eb8de3d69909ae1805ec6a62  0032-grate-stencil-state-readonly.patch
+23f12a4d5b2c761ff081c02b9d8a264bc921442eaae3c49e59be831fe830ab80  0035-dri-expose-stencil-only-visuals.patch
+aeac9b550f418921037d0e852d443cb0c0c961c9cb81da33706629036a72046d  0036-grate-vp-split-uniform-fetches-and-null-shader-draw-guard.patch
