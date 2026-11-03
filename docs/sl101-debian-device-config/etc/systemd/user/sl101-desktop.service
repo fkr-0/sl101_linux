@@ -1,0 +1,11 @@
+[Unit]
+Description=SL101 desktop (manual user-session start)
+After=graphical-session-pre.target
+ConditionPathExists=/usr/bin/labwc
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/sl101-desktop
+Restart=no
+
+# Deliberately not enableable: manual user session only.

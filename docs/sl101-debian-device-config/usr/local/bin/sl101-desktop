@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+# Native Debian logind session: preserve the caller's runtime and D-Bus.
+: "${XDG_RUNTIME_DIR:?requires a logind-owned user session}"
+[ -d "$XDG_RUNTIME_DIR" ] && [ -O "$XDG_RUNTIME_DIR" ] || exit 1
+export XKB_DEFAULT_LAYOUT=de WLR_RENDERER=pixman
+unset LIBSEAT_BACKEND LD_PRELOAD LD_LIBRARY_PATH GBM_BACKENDS_PATH LIBGL_DRIVERS_PATH MESA_LOADER_DRIVER_OVERRIDE
+: "${DBUS_SESSION_BUS_ADDRESS:=unix:path=$XDG_RUNTIME_DIR/bus}"
+export DBUS_SESSION_BUS_ADDRESS
+case "${SL101_COMPOSITOR:-labwc}" in
+ labwc) exec labwc ;;
+ sway) exec sway ;;
+ *) echo 'Unsupported compositor' >&2; exit 64 ;;
+esac

@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+if [ "$#" -eq 0 ]; then
+  echo 'URL required: sl101-cog-url https://example.org' >&2
+  exit 64
+fi
+exec /usr/local/bin/sl101-browse "$1"

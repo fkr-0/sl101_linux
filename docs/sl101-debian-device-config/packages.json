@@ -1,0 +1,24 @@
+{
+  "distribution": "Debian 13 trixie armhf",
+  "required": [
+    "labwc",
+    "foot",
+    "tmux",
+    "keyd",
+    "alsa-utils",
+    "dbus-user-session",
+    "libpam-systemd"
+  ],
+  "optional": [
+    "sway",
+    "zathura",
+    "zathura-pdf-mupdf",
+    "epiphany-browser",
+    "cog",
+    "badwolf",
+    "novnc",
+    "pipewire",
+    "wireplumber"
+  ],
+  "qualification": "All candidates need apt-cache and armhf archive verification before remote install; no package installation authorized in lane 01."
+}

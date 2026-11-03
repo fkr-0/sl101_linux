@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=SL101 Browse
+GenericName=Smart Launcher
+Comment=Open URLs, PDFs or VNC sessions
+Exec=/usr/local/bin/sl101-browse %u
+Icon=applications-internet
+Terminal=false
+Categories=Network;WebBrowser;
+MimeType=text/html;text/xml;application/xhtml+xml;application/pdf;x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/vnc;
+StartupNotify=false

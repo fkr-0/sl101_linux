@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+# Do not touch capture/microphone state or fabricate a card profile.
+if /usr/bin/amixer -c 0 controls 2>/dev/null | grep -Fq 'DAC Companding'; then
+    /usr/bin/amixer -c 0 cset name='DAC Companding' Off
+fi

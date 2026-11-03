@@ -1,0 +1,5 @@
+#!/bin/sh
+if command -v nuraloumi-panel >/dev/null 2>&1; then
+  mkdir -p "$HOME/.local/state"
+  nuraloumi-panel --live >>"$HOME/.local/state/nuraloumi-panel.log" 2>&1 &
+fi

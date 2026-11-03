@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+# Never expose a listening VNC proxy implicitly.
+: "${SL101_NOVNC_URL:?configure an existing approved noVNC proxy URL}"
+exec /usr/local/bin/sl101-browse "$SL101_NOVNC_URL"

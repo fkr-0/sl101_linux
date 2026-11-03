@@ -1,0 +1,158 @@
+[
+  {
+    "path": "/etc/keyd/sl101.conf",
+    "sha256": "08ee8b348ccc13cd050dd714bbb23fe08592ee8bb1d1613beb6d67570d3a3d21",
+    "mode": "0644",
+    "owner": "root:root"
+  },
+  {
+    "path": "/etc/systemd/system/sl101-alsa-companding.service",
+    "sha256": "75bbc9a4568869bbcf7901aa4abb29f1b53060436feebb8b447f8cbfaa71e585",
+    "mode": "0644",
+    "owner": "root:root"
+  },
+  {
+    "path": "/etc/systemd/user/sl101-desktop.service",
+    "sha256": "55c9209466097d0f6f992a02c7d2d1453b5d42d737b40721a6a32ad48fb7e20a",
+    "mode": "0644",
+    "owner": "root:root"
+  },
+  {
+    "path": "/home/user/.config/labwc/autostart",
+    "sha256": "55d092b31af2805fd9802a8fea17ba10359cb233ee3e7c687e60aac21fa1daf4",
+    "mode": "0755",
+    "owner": "session-user:session-user"
+  },
+  {
+    "path": "/home/user/.config/labwc/environment",
+    "sha256": "d91a89cdeee0304fdc158afa4fdb9aa424e2603a5313f3c2970f3c1ea130ecbb",
+    "mode": "0644",
+    "owner": "session-user:session-user"
+  },
+  {
+    "path": "/home/user/.config/labwc/rc.xml",
+    "sha256": "7d943e1d377c73d96f5ae3c5fc46fff29f1d86312ccd17ff26ed0fac22df9908",
+    "mode": "0644",
+    "owner": "session-user:session-user"
+  },
+  {
+    "path": "/home/user/.config/nuraloumi/config.toml",
+    "sha256": "7b3294bbfd3fed29365e6cb934f7cf85d5852a4f8ae965f758ba7935f2a455f7",
+    "mode": "0644",
+    "owner": "session-user:session-user"
+  },
+  {
+    "path": "/home/user/.config/sway/config",
+    "sha256": "99d85a4a7a87e37d59f0de0b8e48cdc12bae43f9ca3f05b16081498e70ce025f",
+    "mode": "0644",
+    "owner": "session-user:session-user"
+  },
+  {
+    "path": "/usr/local/bin/sl101-audio-session",
+    "sha256": "2f04a0db211e66e5ec6c1ee50773e4c09cc011802a812ba56538b1c231549ba9",
+    "mode": "0755",
+    "owner": "root:root"
+  },
+  {
+    "path": "/usr/local/bin/sl101-badwolf",
+    "sha256": "ad9673a3b4749f77075ea737c05b7159a6bab8f29e6aee8dfebc59355a645a07",
+    "mode": "0755",
+    "owner": "root:root"
+  },
+  {
+    "path": "/usr/local/bin/sl101-browse",
+    "sha256": "e443c6a9787052a454a0f96074effc44fdedb7a35548624e3dee27553b685fd6",
+    "mode": "0755",
+    "owner": "root:root"
+  },
+  {
+    "path": "/usr/local/bin/sl101-chvt",
+    "sha256": "04a7c5278d4dea5ff4199abe8d819ce81079f90f6b6119ff8ffa777f0aa53aad",
+    "mode": "0755",
+    "owner": "root:root"
+  },
+  {
+    "path": "/usr/local/bin/sl101-cog-url",
+    "sha256": "74e262b90b6bc0dc7839949bfdc71f0e83979107db4628a9f931f2367c998eb9",
+    "mode": "0755",
+    "owner": "root:root"
+  },
+  {
+    "path": "/usr/local/bin/sl101-cog-wpe",
+    "sha256": "deded9ce4f8412951a4eee2e8baaaeb55ba576694e2da54ef2e1d6ca0c16ea7b",
+    "mode": "0755",
+    "owner": "root:root"
+  },
+  {
+    "path": "/usr/local/bin/sl101-desktop",
+    "sha256": "4e5714836cbd804e37675d395f8c61102080d812e4b18c80a95da7922cc0fca3",
+    "mode": "0755",
+    "owner": "root:root"
+  },
+  {
+    "path": "/usr/local/bin/sl101-epiphany",
+    "sha256": "2f9beff4c5c77c154689178edcaea46d5129513369e8af462e34f633e6572879",
+    "mode": "0755",
+    "owner": "root:root"
+  },
+  {
+    "path": "/usr/local/bin/sl101-foot-launch",
+    "sha256": "4bda567b4e359bb29c4584bf95c7bf17caad96875b1985e53780992759ad0ba4",
+    "mode": "0755",
+    "owner": "root:root"
+  },
+  {
+    "path": "/usr/local/bin/sl101-novnc",
+    "sha256": "12079f42e27ec289d43f2d901b365232e70f6acc65a88224b084d817cc86bcfe",
+    "mode": "0755",
+    "owner": "root:root"
+  },
+  {
+    "path": "/usr/local/bin/sl101-nuraloumi",
+    "sha256": "05d50a739b96c2f29593372af2a8321a8b45fe2ad8e7fcf056de514636ee8224",
+    "mode": "0755",
+    "owner": "root:root"
+  },
+  {
+    "path": "/usr/local/bin/sl101-restart-shell",
+    "sha256": "1f5231fa8d3c03f4b7a02fa4ff382f8b5ffe0cb6bcf7a829be0b708f5ad08c15",
+    "mode": "0755",
+    "owner": "root:root"
+  },
+  {
+    "path": "/usr/local/bin/sl101-terminal-daemon",
+    "sha256": "bb110b311d6d7904e4a37b3d243ed37b36599c3c596ead7b6b90c2434aaed0d9",
+    "mode": "0755",
+    "owner": "root:root"
+  },
+  {
+    "path": "/usr/local/bin/sl101-tmux-session",
+    "sha256": "7c2a7b8cfa5cac4b2bcbc0c77ebca25a6acad0216d660f4a2b1e72d305383ff3",
+    "mode": "0755",
+    "owner": "root:root"
+  },
+  {
+    "path": "/usr/local/bin/sl101-zathura",
+    "sha256": "31b2d58855a179a7287a1da1ebacf339dacaf6c20c89ffc9884272684cf629a3",
+    "mode": "0755",
+    "owner": "root:root"
+  },
+  {
+    "path": "/usr/local/libexec/sl101-alsa-companding",
+    "sha256": "0c474dd0d768cd39e8d75dfb8250466eadc313ba847482ac3bec969fc78e463e",
+    "mode": "0755",
+    "owner": "root:root"
+  },
+  {
+    "path": "/usr/share/applications/sl101-browse.desktop",
+    "sha256": "4570fe016a4c752c4d2e512c923316d1dd6478472f379975b89806e3a190d552",
+    "mode": "0644",
+    "owner": "root:root"
+  },
+  {
+    "path": "/usr/share/applications/sl101-epiphany.desktop",
+    "sha256": "9c22c17156b16f38cbb7bcb906d19c04c281e9270ca1b9d1ace05788f133a3d4",
+    "mode": "0644",
+    "owner": "root:root"
+  }
+]

@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+component=${1:-panel}
+shift || :
+case "$component" in panel|run|files|windows) ;; *) exit 64 ;; esac
+for exe in "/usr/local/bin/nuraloumi-$component" "/usr/bin/nuraloumi-$component"; do
+ [ ! -x "$exe" ] || exec "$exe" "$@"
+done
+echo "NuraLoumi $component is not installed" >&2
+exit 69

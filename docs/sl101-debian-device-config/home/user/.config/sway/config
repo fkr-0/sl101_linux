@@ -1,0 +1,95 @@
+# NuraLoumi sway config — SL101 Eee Pad Slider
+
+# --- Input ---
+input "type:touch" {
+    map_to_output LVDS-1
+    calibration_matrix 1 0 -0.02 0 -1 1
+}
+
+input "type:keyboard" {
+    xkb_layout de
+}
+
+# --- Output ---
+output LVDS-1 {
+    mode 1280x800@58.632Hz
+}
+
+# --- Appearance ---
+# Floating by default (stacking WM feel)
+# All new windows float unless tiled explicitly
+for_window [app_id=".*"] floating enable
+for_window [class=".*"] floating enable
+
+# Thin borders, no titlebar clutter
+default_border pixel 2
+default_floating_border pixel 2
+font pango:Open Sans 11
+
+# Touch-friendly titlebar when needed
+titlebar_padding 8 4
+titlebar_border_thickness 1
+
+# Colors: dark theme
+# class                 border  bg      text    indicator child_border
+client.focused          #4c7899 #285577 #ffffff #2e9ef4   #4c7899
+client.unfocused        #333333 #222222 #888888 #292d2e   #333333
+
+# --- Window management ---
+# Super + touch/mouse drag = move; Super + right-drag = resize
+floating_modifier Mod4 normal
+
+# --- Keybinds ---
+set $mod Mod4
+
+# Terminal
+bindsym $mod+Return exec /usr/local/bin/sl101-foot-launch
+
+# NuraLoumi shell
+bindsym $mod+d exec /usr/local/bin/sl101-nuraloumi run --live --path-complete --recent-files
+bindsym $mod+e exec /usr/local/bin/sl101-nuraloumi files --live
+bindsym Mod1+Tab exec /usr/local/bin/sl101-nuraloumi windows --live
+
+# Window control
+bindsym $mod+f fullscreen toggle
+bindsym $mod+Shift+q kill
+bindsym $mod+Shift+r reload
+
+# Snap to edges (tiling-like)
+bindsym $mod+Left move left
+bindsym $mod+Right move right
+bindsym $mod+Up move up
+bindsym $mod+Down move down
+
+# Snap half-screen (resize + move)
+bindsym $mod+bracketleft exec swaymsg 'move position 0 0, resize set 640 800'
+bindsym $mod+bracketright exec swaymsg 'move position 640 0, resize set 640 800'
+
+# Focus
+bindsym $mod+Tab focus next
+bindsym $mod+Shift+Tab focus prev
+
+# SL101 utilities
+bindsym $mod+u exec /usr/local/bin/sl101-cog-url
+bindsym $mod+b exec /usr/local/bin/sl101-browse
+
+# VT switching
+bindsym Ctrl+Mod1+F1 exec /usr/local/bin/sl101-chvt 1
+bindsym Ctrl+Mod1+F2 exec /usr/local/bin/sl101-chvt 2
+bindsym Ctrl+Mod1+F3 exec /usr/local/bin/sl101-chvt 3
+bindsym Ctrl+Mod1+F4 exec /usr/local/bin/sl101-chvt 4
+bindsym Ctrl+Mod1+F5 exec /usr/local/bin/sl101-chvt 5
+bindsym Ctrl+Mod1+F6 exec /usr/local/bin/sl101-chvt 6
+bindsym Ctrl+Mod1+F7 exec /usr/local/bin/sl101-chvt 7
+
+# Volume
+bindsym XF86AudioRaiseVolume exec amixer -c 0 sset 'Speaker' 5%+ && amixer -c 0 sset 'Headphone' 5%+
+bindsym XF86AudioLowerVolume exec amixer -c 0 sset 'Speaker' 5%- && amixer -c 0 sset 'Headphone' 5%-
+
+# --- Autostart ---
+exec /usr/local/bin/sl101-nuraloumi panel --live
+
+# No swaybar — NuraLoumi panel handles status
+bar {
+    mode invisible
+}

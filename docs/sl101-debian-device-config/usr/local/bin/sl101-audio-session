@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+case "${1:-status}" in
+ status) exec systemctl --user status pipewire.service wireplumber.service ;;
+ start) exec systemctl --user start pipewire.socket wireplumber.service ;;
+ *) echo 'Audio stop/restart not permitted by this launcher' >&2; exit 69 ;;
+esac

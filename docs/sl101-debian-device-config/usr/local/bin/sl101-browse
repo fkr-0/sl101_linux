@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+arg=${1:-about:blank}
+case "$arg" in
+ *.pdf|*.PDF)
+  if [ -f "$arg" ] && command -v zathura >/dev/null 2>&1; then exec zathura "$arg"; fi ;;
+ *:59[0-9][0-9]) exec /usr/local/bin/sl101-novnc "$arg" ;;
+esac
+for browser in epiphany badwolf; do
+ if command -v "$browser" >/dev/null 2>&1; then exec "$browser" "$arg"; fi
+done
+if command -v cog >/dev/null 2>&1; then exec cog --platform=wl "$arg"; fi
+echo 'Native Debian browser unavailable' >&2
+exit 69
