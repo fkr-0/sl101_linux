@@ -1,9 +1,68 @@
-# GR3D serialization lane 02 — qualification gate
+# GR3D serialization lane 02 — safety revision (2026-11-03)
 
-The legacy host interposer reportedly unlocks after OPEN_CHANNEL (0x45), rather than waiting for GPU completion. Patch 0029 holds the device flock across SUBMIT and fence wait; unlocking immediately after an asynchronous SUBMIT is **not a safe fix**. The checked-in candidate must remain inactive until host labwc strace proves the matching wait protocol and explicit lane 01 live-device ownership handoff is recorded.
+## Decision: HOLD / NOT DEPLOYABLE
 
-Hardware gating: identify the host GR3D channel and syncpoint ID via OPEN_CHANNEL / GET_SYNCPT, record each SUBMIT fence and matching successful SYNCPT_WAIT (0x44), distinguish GR2D submissions, inspect /proc/locks during simultaneous clients, and verify screenshot pixels, dmesg and both clients' submit traces. A missing wait requires a different completion strategy, not an unconditional unlock. Verify full state re-emission after lock acquisition because GR3D lacks context isolation.
+Independent review of original packet `ade186dd-f656-4ca6-8681-95b77b1b723c`
+requested changes. The prior `ioctl` interposer has been replaced by a
+**non-interposing, inert build sentinel**. It exports
+`sl101_gr3d_fbl02_disabled() == -ENOTSUP` and deliberately does **not**
+export `ioctl`, acquire a lock, inspect any pointer or claim that GPU work
+has completed. Loading this candidate cannot supply GR3D serialization:
+it MUST NOT replace a working desktop library or enable accelerated
+defaults. This is risk removal, **not** completion of the original feature.
 
-Candidate implementation: `docs/sl101-device-config/usr/local/src/gr3d_serialize_fbl02.c`; mock regression: `fbl/02-gr3d-lock-protocol-test.c`. Local host compile and mock tests passed; these do not prove target musl ABI or correct GPU execution. The interposer is NOT wired into the desktop or a default build. Further blockers before deployment: prove that intercepted SUBMIT belongs to GR3D (GR2D must not be serialized unnecessarily), verify all per-fd fence waits and channel/syncpoint reuse, check CLOSE/dup/fork and interposer reentrancy, and confirm that a successful wait threshold implies completion for the actual submitted fence. Prefer using the same patch-0029 Mesa lock/wait strategy in the host Grate prefix if its completion guarantees and error cleanup can be verified. Both approaches require safe full-state re-emission across clients. A reviewer must explicitly approve the candidate before promotion.
+Original source path remains
+`docs/sl101-device-config/usr/local/src/gr3d_serialize_fbl02.c`;
+native adversarial evidence is in `fbl/02-gr3d-lock-protocol-test.c`.
+No device, process environment or Mesa driver was modified.
 
-No device changes, restarts, cross-compilation or deployment are authorized for this packet without that evidence. For Alpine/musl build use the Alpine armv7 toolchain, never Debian glibc. Keep pixman fallback. Do not edit build/mesa-grate-clean or series/build scripts (lane 06 owns them).
+## Review disposition
+
+| Reviewer concern | Disposition / missing proof |
+| --- | --- |
+| Device, channel, GR3D identity | No ioctl interception until canonical device driver and channel identity are verified; ioctl nr `0x48` alone is not sufficient, including on non-GR3D DRM devices. |
+| Completion ordering and ioctl ABI | Inert implementation has no premature unlock; target UAPI structure layout, successful wait-to-fence ordering, and `wait` semantics remain unproven. |
+| fd dup, close, reuse and description lifetime | No caller-owned fd retained. Native adversarial pthread/fork/dup/close/reuse probes document kernel flock lifetime. Any future scheme needs an owned duplicate/open description and ordered cleanup. |
+| Fork and reentrancy | No hook, mutex or global state in disabled candidate; full fork/recursive-ioctl protocol is not implemented. |
+| Invalid userspace `syncpts` | No dereference at all, including arbitrary userspace pointers. A future design must copy validated ABI fields safely rather than blindly dereference. |
+| Syncpoint wraparound | No threshold comparisons; new design needs an authoritative wraparound contract, not signed difference alone. |
+| Interrupted waits, failures, bounded errors | Native mock checks that EINTR/ETIMEDOUT do not release a held lock; kernel completion and submission-failure-in-flight behavior are not established. |
+| BO/fence lifetime | NOT proven by these tests. The disabled code does not manage BOs, and tests cannot establish GPU ownership. Never free an in-flight BO based on user-space heuristics. |
+| Non-GR3D devices | No interposition at all, so matching request numbers cannot accidentally capture them. |
+
+## Verification boundary
+
+Run on **host only**:
+
+    cc -std=c11 -Wall -Wextra -Werror -pthread -o /tmp/gr3d-fbl02-test fbl/02-gr3d-lock-protocol-test.c
+    /tmp/gr3d-fbl02-test
+    cc -std=c11 -Wall -Wextra -Werror -fPIC -shared -o /tmp/gr3d-fbl02-disabled.so docs/sl101-device-config/usr/local/src/gr3d_serialize_fbl02.c
+    nm -D /tmp/gr3d-fbl02-disabled.so
+    make test
+    make check
+
+The native tests exercise actual process and thread exclusion on distinct
+open descriptions, keeping a lock across original fd close, dup and
+reopening/reusing fd numbers, and retaining it after simulated interrupted
+and timed-out waits. They **do not** exercise a real GR3D submit or prove
+correctness of GPU completion, fence/BO lifetime, Mesa patch 0029 or the
+actual Alpine/musl ARMv7 target ABI.
+
+## Remaining acceptance gates and handoff
+
+1. Establish and pin the Alpine/musl ARMv7 SDK and produce off-device
+   ELF/ABI evidence; never build Mesa on the SL101.
+2. Independently trace/verify GR3D OPEN_CHANNEL, submit, syncpoint and
+   completion semantics on the authorized target, including GR2D negatives,
+   channel reuse, wraparound, EINTR, submit failures and no-wait paths.
+3. Design a single verifiable ownership protocol for every submission and
+   fence/BO lifetime, including fd duplication, close/reuse, fork and
+   reentrancy. Without a proven matching completion, fail closed.
+4. Verify full GR3D state re-emission after inter-client lock acquisition,
+   compare Mesa patch 0029 completion guarantees, and test two concurrent
+   clients under separately authorized lane 01 handoff.
+5. Require new independent source review and only then subsequent
+   conductor-controlled hardware qualification. Retain pixman fallback.
+
+No SSH writes, deployment, LD_PRELOAD activation, graphics/session mutation,
+default promotion or public publication are authorized for this revision.
