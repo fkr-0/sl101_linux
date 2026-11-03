@@ -35,8 +35,8 @@ No device mutation, service start, package operation, live graphics launch, buil
 | Evidence category | Result | Interpretation |
 |---|---|---|
 | Host mirror regression | `python3 -m unittest discover -s docs/sl101-debian-device-config -p test_mirror.py` | 12 tests passed: exhaustive source hashes, payload hashes, shell and XML syntax, VT/keymap, logind rejection, staging dry-run/install/rollback and backup preservation, symlink/marker rejection, systemd system-unit staging verification |
-| Host project tests | `make test` | See latest execution receipt below |
-| Host project checks | `make check` | See latest execution receipt below |
+| Host project tests | `make test` | 199 tests passed, exit 0 (2026-11-03 host-only run) |
+| Host project checks | `make check` | Exit 0, Python compileall completed (2026-11-03 host-only run) |
 | Remote read-only probe | SSH strict host checks | Debian 13.7, package/logind state above; no mutation |
 | Hosted armhf application/Mesa builds | not performed by this lane | Dependency on build lanes |
 | Live session/services/audio/hardware inputs | not started | Deployment lane only |
