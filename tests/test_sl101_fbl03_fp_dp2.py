@@ -1,6 +1,8 @@
-"""Lane 03: static source checks for DP2 lowering; not real GPU execution."""
+"""Lane 03: patch contracts and compiled host lowering regression; no GPU pixels."""
 from pathlib import Path
 import re
+import subprocess
+import sys
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,6 +22,17 @@ class FPDP2Patch(unittest.TestCase):
         self.assertIn("fp_dot_scratch", dot)
         self.assertIn("source_mask", dot)
         self.assertIn("direct_final = false;", dot)
+
+    def test_compiled_native_dp2_regression(self):
+        # Pinned historical Mesa source lives in the private work tree.
+        lane = ROOT / 'work/fbl-revisions-20261103/03-dp2-native-semantics'
+        runner = lane / 'run_native.py'
+        if not runner.is_file():
+            self.skipTest('private isolated source fixture absent: native DP2 regression unverified')
+        result = subprocess.run([sys.executable, str(runner)], cwd=ROOT,
+                                capture_output=True, text=True, timeout=120)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('PASS: 14 grate FRC/DP lowering structural tests', result.stdout)
 
     def test_no_cap_spoof(self):
         text = DP2.read_text()
