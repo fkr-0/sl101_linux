@@ -1,0 +1,19 @@
+{
+  "schema": "sl101.fbl03.native-fixture.v1",
+  "attribution": "Historical SL101 Grate/Mesa 25.0.7-derived lane03 source; rebased-base.c copied unchanged from work/SL101-LINUX-03-FP-FRC-DP-20261102-5A88BE/rebased-base.c. This file is not claimed to be pristine upstream Mesa. Mesa original license/attribution is retained; older rebasing history is not fully reconstructed.",
+  "original_packet": "efeda9fb-85ae-4857-b29f-5d511d22d045",
+  "continuation_packet": "a9186341-9d63-4065-bf21-7453061f854e",
+  "patch_order": [
+    "patches/mesa-25.0.7/0012-grate-fp-frc-dp3-dp4.patch",
+    "patches/mesa-25.0.7/0037-grate-fp-dp2.patch"
+  ],
+  "patched_sha256": "514bfd76e0578c6e5a673f0a218dbe6a63b2db9416ea1b99f62924a1ee024b35",
+  "inputs": {
+    "tests/fixtures/sl101-fbl03-native/rebased-base.c": "2f5f5ebc6a582fe9205f757fb43b79c1150ba780eb09d534bfd936f3c6ea276f",
+    "tests/fixtures/sl101-fbl03-native/grate_compiler.h": "4b1b6e7c8d7af47daee38952229ef9a2328fb1a1aafe0a8ae057b2af1ff299f4",
+    "tests/fixtures/sl101-fbl03-native/fpir.h": "36e190f6e41c5910168c66a8b7cd6971187cbc0b91e41cd63e8d0852df9b9599",
+    "patches/mesa-25.0.7/0012-grate-fp-frc-dp3-dp4.patch": "069e06e2749997afe2cda662a666ae1e3f9435ea31d7f4ef94177bbdfff8f52f",
+    "patches/mesa-25.0.7/0037-grate-fp-dp2.patch": "78bc63f2a62adf36c6de1faab68d9e6b2fe82b4083dc0246c0fe5a72766d53da",
+    "tests/fixtures/sl101-fbl03-native/test_dp2.c": "31cbd8258a6d7b6974f22b114d194f6ae45a8322f3da4ca207b6e1c4d5368dab"
+  }
+}

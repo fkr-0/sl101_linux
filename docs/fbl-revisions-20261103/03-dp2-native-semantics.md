@@ -31,3 +31,11 @@ The tracked `tests/test_sl101_fbl03_fp_dp2.py` runs this native harness when the
 - No live device, SSH, compositor/session, GPU raster, or default acceleration changes. The production software-rendered recovery path remains untouched.
 - GPU pixels, Skia Ganesh shader inventory and target compatibility remain **unverified**; no live qualification or deployment is authorized by this revision.
 - Review remains mandatory; no self-approval. Lane06 owns patch-series/build handoff. Record integration baseline and patch hashes above before any downstream work.
+
+## Continuation: portable native fixture and review scope (2026-11-03)
+
+OCP task `SL101-LINUX-07-DP2-PORTABLE-HANDOFF-20261103-E8AFAD`; continuation packet `a9186341-9d63-4065-bf21-7453061f854e` (opportunity `admitted-67490d36eaf5c473d4a90f47`). Original packet `efeda9fb-85ae-4857-b29f-5d511d22d045` remains blocked; original artifacts, commits `86f259a` and `160491b`, original negative current-source replay and native 14 cases are preserved. The original report was retained; this is an additive continuation.
+
+Tracked source/harness: `tests/fixtures/sl101-fbl03-native/{rebased-base.c,grate_compiler.h,fpir.h,test_dp2.c,manifest.json,README.md}`; strict runner: `scripts/sl101-fbl03-native-qualify.py`. The SHA-256 manifest identifies sources, patch order and expected output. The local historical rebased source is now committed, so the lowering replay no longer requires private `work/` sources. **The Mesa Grate configured Ninja build used to supply host compile flags still needs independently reproducible, pinned external preparation (lane06); a pristine checkout alone cannot perform the host build.** The historical source rebasing lineage predating `rebased-base.c` likewise remains incomplete; neither is represented as reconstructed provenance.
+
+The explicit native command is `python3 scripts/sl101-fbl03-native-qualify.py --mesa-build build/mesa-grate-clean/mesa-25.0.7/builddir`; failures and missing inputs return nonzero. Optional Python unittest skips never count as native qualification. C assertions inspect emitted instructions, not numerical GPU execution, compiled shader correctness, or pixels.

@@ -24,15 +24,24 @@ class FPDP2Patch(unittest.TestCase):
         self.assertIn("direct_final = false;", dot)
 
     def test_compiled_native_dp2_regression(self):
-        # Pinned historical Mesa source lives in the private work tree.
-        lane = ROOT / 'work/fbl-revisions-20261103/03-dp2-native-semantics'
-        runner = lane / 'run_native.py'
-        if not runner.is_file():
-            self.skipTest('private isolated source fixture absent: native DP2 regression unverified')
+        # Optional unit test for developer hosts; explicit qualification is NEVER optional.
+        runner = ROOT / "scripts/sl101-fbl03-native-qualify.py"
+        build = ROOT / "build/mesa-grate-clean/mesa-25.0.7/builddir/build.ninja"
+        self.assertTrue(runner.is_file(), "tracked native qualification runner missing")
+        if not build.is_file():
+            self.skipTest("configured Mesa build absent; run explicit native qualification")
         result = subprocess.run([sys.executable, str(runner)], cwd=ROOT,
                                 capture_output=True, text=True, timeout=120)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn('PASS: 14 grate FRC/DP lowering structural tests', result.stdout)
+        self.assertIn("PASS: 14 grate FRC/DP lowering structural tests", result.stdout)
+
+    def test_native_qualification_fails_missing_build(self):
+        runner = ROOT / "scripts/sl101-fbl03-native-qualify.py"
+        result = subprocess.run([sys.executable, str(runner), "--mesa-build",
+                                 str(ROOT / "tests/fixtures/sl101-fbl03-native/no-build")],
+                                cwd=ROOT, capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("missing configured Mesa build.ninja", result.stderr)
 
     def test_no_cap_spoof(self):
         text = DP2.read_text()
