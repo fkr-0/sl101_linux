@@ -25,6 +25,14 @@ Local Debian ARMHF package archives: `cog_0.18.5-1_armhf.deb` SHA-256 `c3b698c9e
 
 Observed host tests: `tests.test_sl101_cog_teardown`: 3/3 pass; `make test`: 247 tests pass (some existing test fixture intentionally prints a failed patch replay); `make check`: pass. The isolated host Cog Meson setup failed specifically on missing `wpe-webkit-2.0`, `wpe-webkit-1.1`, and `wpe-webkit-1.0` dependencies.
 
+## November 5 source-extracted negative regression (HOLD)
+
+`tests/test_sl101_cog_teardown_negative.py` compiles the **actual patched function bodies** of `release_buffer_exports()` and `destroy_buffer()` from the pinned private Cog source, substituting host-only DRM, GBM, GLib and FDO mocks. Under a deliberately reentrant FDO-release mock that destroys the same buffer before dispatch returns, AddressSanitizer reports `heap-use-after-free` when the outer `destroy_buffer()` continues to access `buffer->fb_id`. This is a source-grounded **counterexample** to the prior candidate's safety claim, not confirmation that target WPE/FDO follows precisely this callback sequence. Both the original standalone model and the new negative oracle pass, but their joint success does **not** qualify production teardown. Reproduction:
+
+    python3 -m unittest tests.test_sl101_cog_teardown_negative -v
+
+The negative test intentionally expects the sanitizer failure; it must become a positive real-callback, exactly-once teardown regression when the candidate is rewritten. Source patch remains unchanged, **HOLD**. A safe revision must detach resource listeners and invalidate buffer and flip references *before* synchronous FDO dispatch, establish ownership of callbacks already in progress, and prevent frame-complete/release callbacks from using a renderer after shutdown reentry. Destroying GLib's event source is not equivalent to draining kernel pending-flip userdata. Independent review must validate these invariants using patched callbacks and fault injection, followed by ARMHF link and serial device gates.
+
 ## Later serial qualification
 
 After actual linked Cog build and independent review, sole graphics owner verifies Nura `.106` separately from Debian `.100`, exact source/build/installed .so hashes, backups, no shared launcher mutation and rollback. With physical supervision, collect clean shutdown, SIGTERM, pending and rejected flips, exactly-once release/destroy instrumentation, 60s soak, symbolized segvbt, KMS logs, actual pixel evidence and rollback status. Preserve labwc flock/shim HOLD. Producer's reported 262 flips, 2610 GR3D submissions and 20fps with CPU Skia are not teardown proof.
