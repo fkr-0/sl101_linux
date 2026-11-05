@@ -18,6 +18,23 @@ Focused host regression run in this review:
 `python3 -m unittest tests.test_sl101_cog_kms_input_candidate tests.test_sl101_cog_hang_supervisor tests.test_sl101_cog_teardown -v`: **16/16 PASS**.
 `python3 -m unittest discover -s work/sl101-wpe-producer-buffer-oracle-20261105 -p 'test_*.py' -v`: **9/9 PASS**.
 
+## Independent security-review cross-check (OCP 09)
+
+After the first-four device gates, the separate read-only security worker
+completed OCP `SL101-LINUX-20261105-09-INDEPENDENT-SECURITY-AND-RECOVERY-RE-20261105-4722E6`:
+**NOT APPROVED** for production execution. It found critical unowned/global
+Cog process cleanup and missing independent watchdog in the older Wayland
+probe, high-risk Pixman rollback behavior, and a high-risk broad input-device
+allowlist plus unverified supervisor environment gate in the *existing* KMS
+input candidate. Those are blockers, not merely style recommendations.
+
+This follow-up's separate scratch-namespace smoke **does not modify or
+approve** that candidate. It exposes only exact event0/event5 and udev in a
+short-lived namespace, never starts Cog and verifies no host mount leak.
+Production input integration must explicitly allowlist device identities,
+retain injection and private credentials, fix actual supervisor identity and
+teardown cleanup, and undergo new independent review before any live launch.
+
 ## Exact target and initial state
 
 Read-only SSH identity (BatchMode, strict host key):
