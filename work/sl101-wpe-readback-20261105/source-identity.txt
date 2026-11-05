@@ -1,0 +1,3 @@
+Cog source: work/scanout-followups-20261103/cog-teardown/cog-src/platform/wayland/cog-platform-wl.c
+sha256: c78ea1a4e704b12a36fa1d3066d352d8aa949da35bbd8139dabe4ce3657d0ad4
+Mesa DRI2 source: build/mesa-grate-clean/mesa-25.0.7/src/egl/drivers/dri2/egl_dri2.c

@@ -1,0 +1,42 @@
+--- a/platform/wayland/cog-platform-wl.c
++++ b/platform/wayland/cog-platform-wl.c
+@@ -40,6 +40,7 @@
+ #include "cog-im-context-wl-v1.h"
+ #include "cog-im-context-wl.h"
+ #include "cog-popup-menu-wl.h"
++#include "sl101-wpe-readback.h"
+ 
+ #include "fullscreen-shell-unstable-v1-client.h"
+ #include "linux-dmabuf-unstable-v1-client.h"
+@@ -1704,6 +1705,31 @@
+         return;
+     }
+ 
++    /*
++     * SL101 diagnostic: query producer EGLImage metadata BEFORE attaching.
++     * Never claim producer bytes here. Cog's WPE FDO callback provides no
++     * independently verified producer sync_file FD: fail closed on readback.
++     * The helper is linked only in the private candidate build.
++     */
++    {
++        struct sl101_rb_metadata rb_meta = {0};
++        enum sl101_rb_result rb_status = sl101_rb_probe(
++            egl_data.display,
++            wpe_fdo_egl_exported_image_get_egl_image(image),
++            wpe_fdo_egl_exported_image_get_width(image),
++            wpe_fdo_egl_exported_image_get_height(image),
++            &rb_meta);
++        if (rb_status == SL101_RB_OK_CONDITIONAL)
++            g_debug("SL101 producer export metadata only: %ux%u fourcc=%08x modifier=%016" PRIx64
++                    " planes=%d pitch=%d offset=%d allocation=%" PRIu64
++                    " pixels=UNVERIFIED reason=no_producer_fence",
++                    rb_meta.width, rb_meta.height, rb_meta.fourcc,
++                    rb_meta.modifier, rb_meta.plane_count,
++                    rb_meta.pitch, rb_meta.offset, rb_meta.storage_bytes);
++        else
++            g_debug("SL101 producer metadata unavailable: status=%d pixels=UNVERIFIED", rb_status);
++    }
++
+     wpe_view_data.image = image;
+ 
+     if (wpe_view_data.should_update_opaque_region) {
