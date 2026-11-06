@@ -1,0 +1,170 @@
+# SL101 Sway configuration: workstation i3 window-management parity.
+# Source: /home/user/.dotfiles/config/i3/config (host, 2026-11-06).
+# Keep NuraLoumi apps/VT/touch/audio bindings; omit X11/desktop-only helpers.
+# Sway is the compositor; Grate vs Pixman is selected by sl101-desktop, NOT here.
+
+set $mod Mod4
+font pango:Open Sans 11
+
+# Tablet-native keyboard and touchscreen.
+input "type:keyboard" {
+    xkb_layout de
+}
+input "type:touch" {
+    map_to_output LVDS-1
+    calibration_matrix 1 0 -0.02 0 -1 1
+}
+output LVDS-1 {
+    mode 1280x800@58.632Hz
+}
+
+# Workstation i3 behavior: tile ordinary app windows by default.
+# Do NOT add unconditional for_window floating rules for all app_id/class.
+# Transient dialogs and the NuraLoumi application launcher remain floating.
+for_window [window_type="dialog"] floating enable
+for_window [app_id="nuraloumi-run"] floating enable
+for_window [app_id="nuraloumi-menu"] floating enable
+
+default_border pixel 2
+default_floating_border pixel 2
+titlebar_padding 8 4
+titlebar_border_thickness 1
+client.focused          #4c7899 #285577 #ffffff #2e9ef4 #4c7899
+client.unfocused        #333333 #222222 #888888 #292d2e #333333
+
+# i3: Super + mouse/touch drag moves floating windows.
+floating_modifier $mod normal
+focus_follows_mouse yes
+mouse_warping output
+
+# Core actions (same as workstation i3).
+bindsym $mod+Return exec /usr/local/bin/sl101-foot-launch
+bindsym $mod+Shift+q kill
+bindsym $mod+f fullscreen toggle
+bindsym $mod+Shift+space floating toggle
+bindsym $mod+Ctrl+space focus mode_toggle
+bindsym $mod+g focus mode_toggle
+bindsym $mod+a focus parent
+bindsym $mod+c focus child
+
+# Directional focus (i3: h/j/k/l, plus arrow keys).
+bindsym $mod+h focus left
+bindsym $mod+j focus down
+bindsym $mod+k focus up
+bindsym $mod+l focus right
+bindsym $mod+Left focus left
+bindsym $mod+Down focus down
+bindsym $mod+Up focus up
+bindsym $mod+Right focus right
+
+# Move the focused window/container.
+bindsym $mod+Shift+h move left
+bindsym $mod+Shift+j move down
+bindsym $mod+Shift+k move up
+bindsym $mod+Shift+l move right
+bindsym $mod+Shift+Left move left
+bindsym $mod+Shift+Down move down
+bindsym $mod+Shift+Up move up
+bindsym $mod+Shift+Right move right
+
+# Resize without entering a mode.
+bindsym $mod+Ctrl+h resize shrink width 2 px or 2 ppt
+bindsym $mod+Ctrl+j resize grow height 2 px or 2 ppt
+bindsym $mod+Ctrl+k resize shrink height 2 px or 2 ppt
+bindsym $mod+Ctrl+l resize grow width 2 px or 2 ppt
+
+# Split, stacking and tabbing.
+bindsym $mod+Shift+v splith
+bindsym $mod+v splitv
+bindsym $mod+s layout stacking
+bindsym $mod+w layout tabbed
+bindsym $mod+e layout toggle split
+
+# Scratchpad like workstation i3.
+bindsym $mod+Shift+minus move scratchpad
+bindsym $mod+minus scratchpad show
+
+# Cycle windows, or open NuraLoumi's window switcher.
+bindsym $mod+Tab focus next
+bindsym $mod+Shift+Tab focus prev
+bindsym Mod1+Tab exec /opt/nuraloumi/current/nuraloumi-windows --live
+bindsym $mod+o exec /opt/nuraloumi/current/nuraloumi-windows --live
+bindsym $mod+dead_circumflex workspace back_and_forth
+
+# Workspaces: Super+number selects; Super+Shift+number sends a window there.
+# SL101's keyd currently rewrites Super+1..7 to Ctrl+Alt+F1..F7 for VT
+# recovery. Thus the numeric bindings work on unaffected keyboards only.
+# These additional Super+Ctrl+arrows always allow workspace navigation.
+bindsym $mod+Ctrl+Left workspace prev
+bindsym $mod+Ctrl+Right workspace next
+bindsym $mod+Ctrl+Shift+Left move container to workspace prev
+bindsym $mod+Ctrl+Shift+Right move container to workspace next
+bindsym $mod+1 workspace number 1
+bindsym $mod+2 workspace number 2
+bindsym $mod+3 workspace number 3
+bindsym $mod+4 workspace number 4
+bindsym $mod+5 workspace number 5
+bindsym $mod+6 workspace number 6
+bindsym $mod+7 workspace number 7
+bindsym $mod+8 workspace number 8
+bindsym $mod+9 workspace number 9
+bindsym $mod+0 workspace number 10
+bindsym $mod+Shift+1 move container to workspace number 1
+bindsym $mod+Shift+2 move container to workspace number 2
+bindsym $mod+Shift+3 move container to workspace number 3
+bindsym $mod+Shift+4 move container to workspace number 4
+bindsym $mod+Shift+5 move container to workspace number 5
+bindsym $mod+Shift+6 move container to workspace number 6
+bindsym $mod+Shift+7 move container to workspace number 7
+bindsym $mod+Shift+8 move container to workspace number 8
+bindsym $mod+Shift+9 move container to workspace number 9
+bindsym $mod+Shift+0 move container to workspace number 10
+
+# Resize mode (workstation i3 parity).
+mode "resize" {
+    bindsym h resize shrink width 2 px or 2 ppt
+    bindsym j resize grow height 2 px or 2 ppt
+    bindsym k resize shrink height 2 px or 2 ppt
+    bindsym l resize grow width 2 px or 2 ppt
+    bindsym Left resize shrink width 2 px or 2 ppt
+    bindsym Down resize grow height 2 px or 2 ppt
+    bindsym Up resize shrink height 2 px or 2 ppt
+    bindsym Right resize grow width 2 px or 2 ppt
+    bindsym Return mode "default"
+    bindsym Escape mode "default"
+}
+bindsym $mod+r mode "resize"
+
+# Reload configuration (do NOT use i3's restart shortcut on Sway).
+bindsym $mod+Shift+c reload
+bindsym $mod+Shift+r reload
+
+# Tablet-specific NuraLoumi launcher and tools.
+# i3's Super+e is now "layout toggle split"; Nura Files moves to Super+Shift+e.
+bindsym $mod+d exec /opt/nuraloumi/current/nuraloumi-run --live --path-complete --recent-files
+bindsym $mod+period exec /opt/nuraloumi/current/nuraloumi-run --live --path-complete --recent-files
+bindsym $mod+space exec /opt/nuraloumi/current/nuraloumi-run --live --path-complete --recent-files
+bindsym $mod+Shift+e exec /opt/nuraloumi/current/nuraloumi-files --live
+bindsym $mod+u exec /usr/local/bin/sl101-cog-url
+bindsym $mod+b exec /usr/local/bin/sl101-browse
+
+# Original SL101 VT recovery shortcuts; keyd maps Super+1..7 to Ctrl+Alt+Fn
+# when a text VT is active. Use the existing audited chvt helper in Sway.
+bindsym Ctrl+Mod1+F1 exec sudo /usr/local/bin/sl101-chvt 1
+bindsym Ctrl+Mod1+F2 exec sudo /usr/local/bin/sl101-chvt 2
+bindsym Ctrl+Mod1+F3 exec sudo /usr/local/bin/sl101-chvt 3
+bindsym Ctrl+Mod1+F4 exec sudo /usr/local/bin/sl101-chvt 4
+bindsym Ctrl+Mod1+F5 exec sudo /usr/local/bin/sl101-chvt 5
+bindsym Ctrl+Mod1+F6 exec sudo /usr/local/bin/sl101-chvt 6
+bindsym Ctrl+Mod1+F7 exec sudo /usr/local/bin/sl101-chvt 7
+
+# Original SL101 audio controls: keep the tested ALSA mappings.
+bindsym XF86AudioRaiseVolume exec amixer -c 0 sset 'Speaker' 5%+ && amixer -c 0 sset 'Headphone' 5%+
+bindsym XF86AudioLowerVolume exec amixer -c 0 sset 'Speaker' 5%- && amixer -c 0 sset 'Headphone' 5%-
+
+# NuraLoumi panel owns the desktop/status shell; avoid desktop i3 programs
+# (picom/polybar/rofi/dunst/copyq/kitty), which aren't part of SL101.
+exec /opt/nuraloumi/current/nuraloumi-panel --live --enable-renderer-switch >>"$HOME/.local/state/nuraloumi-panel.log" 2>&1
+bar {
+    mode invisible
+}
