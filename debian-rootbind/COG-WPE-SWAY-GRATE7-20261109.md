@@ -170,3 +170,35 @@ or mutate a running Sway environment to make the indicator green.
 - A future persistent Debian Sway/Cog/NuraLoumi session should use
   a real logind/seat lifecycle and an installed/owned configuration,
   rather than copying transient `/tmp` launch scripts blindly.
+
+## Bounded operator-visible browser session after initial tests
+
+Because the first interactive Cog supervisor exited normally at its
+680-second test limit, the first Sway compositor was shut down
+**gracefully through its own IPC** (the client printed
+`Unable to receive IPC response` because the compositor exited before
+the reply; the Wayland socket and compositor process did disappear).
+
+At 12:59 CET the device was revalidated (same host, CID, kernel,
+MicroSD root, active seatd, no other active Sway/Cog). A fresh
+non-root hardware-DRM session was started with the same Prod70
+configuration and a **3,600-second** Sway supervisor, paired with
+a **3,500-second** Cog/WPE supervisor displaying
+`https://example.com/`.
+
+Direct second-session evidence:
+
+- Sway PID **1873**, Cog PID **1891**;
+- Cog log `Loaded successfully.` at 12:59:35 CET;
+- `swaymsg` reports `com.igalia.Cog`, visible at 1280×800;
+- log files under `/tmp/sl101-sway-prod70-interactive-20261109.log`
+  and `/tmp/sl101-cog-prod70-interactive-20261109.log`;
+- both sessions **automatically terminate within approximately one
+  hour**; no persistent user or systemd autostart was enabled.
+
+The operator can stop the current Sway session through its
+test-only `Mod4+Shift+e` binding (`exit`) or an authorized
+`swaymsg -t command exit` on the session's socket. This closes
+Cog as a consequence of the Wayland connection terminating.
+The eventual normal Debian login/configuration should be reviewed
+and installed separately, not inferred from this bounded trial.
