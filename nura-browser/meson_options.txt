@@ -1,0 +1,2 @@
+option('armhf_qualification', type: 'boolean', value: false,
+       description: 'Fail unless the toolchain is cross-building ARMv7 hard-float VFPv3-D16 (without NEON)')
