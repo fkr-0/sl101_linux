@@ -1,0 +1,61 @@
+#!/bin/sh
+# Sway exec_always hook: restart the panel on compositor config reload.
+# Sway itself remains running; do not restart the DRM session here.
+set -eu
+
+: "${HOME:?}"
+: "${XDG_RUNTIME_DIR:?}"
+panel=${SL101_SWAY_PANEL_BIN:-/opt/nuraloumi/current/nuraloumi-panel}
+log_dir=${XDG_STATE_HOME:-"$HOME/.local/state"}
+lock="$XDG_RUNTIME_DIR/sl101-sway-panel.lock"
+
+if [ ! -x "$panel" ]; then
+    echo "sl101-sway-panel: missing executable $panel" >&2
+    exit 1
+fi
+
+umask 077
+mkdir -p "$log_dir"
+exec 9>"$lock"
+flock -x 9
+
+# Alpine's BusyBox pgrep lacks -u. Filter exact-name PIDs by their real
+# /proc UID; never use a broad pkill -f or signal another user's panel.
+uid=$(id -u)
+owned_panel_pids() {
+    for pid in $(pgrep -x nuraloumi-panel || true); do
+        case "$pid" in
+            *[!0-9]*|'') continue ;;
+        esac
+        [ -r "/proc/$pid/status" ] || continue
+        owner=$(awk '$1 == "Uid:" { print $2; exit }' "/proc/$pid/status" 2>/dev/null || true)
+        [ "$owner" = "$uid" ] && printf '%s\n' "$pid"
+    done
+}
+for pid in $(owned_panel_pids); do
+    kill -TERM "$pid" 2>/dev/null || true
+done
+
+# Wait for the old Wayland client to exit before making a new layer surface.
+attempt=0
+while [ -n "$(owned_panel_pids)" ]; do
+    if [ "$attempt" -ge 20 ]; then
+        echo "sl101-sway-panel: old panel has not exited; refusing duplicate" >&2
+        exit 1
+    fi
+    attempt=$((attempt + 1))
+    sleep 0.1
+done
+
+# Do not pass the flock FD to the long-lived panel (or the lock never frees).
+(
+    exec 9>&-
+    exec nohup "$panel" --live --enable-renderer-switch \
+        >>"$log_dir/nuraloumi-panel.log" 2>&1 </dev/null
+) &
+new_pid=$!
+sleep 0.2
+if ! kill -0 "$new_pid" 2>/dev/null; then
+    echo "sl101-sway-panel: panel exited during startup; inspect $log_dir/nuraloumi-panel.log" >&2
+    exit 1
+fi

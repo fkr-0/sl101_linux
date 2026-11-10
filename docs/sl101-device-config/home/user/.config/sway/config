@@ -92,22 +92,27 @@ bindsym $mod+o exec /opt/nuraloumi/current/nuraloumi-windows --live
 bindsym $mod+dead_circumflex workspace back_and_forth
 
 # Workspaces: Super+number selects; Super+Shift+number sends a window there.
-# SL101's keyd currently rewrites Super+1..7 to Ctrl+Alt+F1..F7 for VT
-# recovery. Thus the numeric bindings work on unaffected keyboards only.
-# These additional Super+Ctrl+arrows always allow workspace navigation.
+# keyd leaves Super untouched and reserves physical RightAlt+LeftCtrl+1..9
+# for VT switching instead. Arrows remain a fallback for workspace navigation.
 bindsym $mod+Ctrl+Left workspace prev
 bindsym $mod+Ctrl+Right workspace next
 bindsym $mod+Ctrl+Shift+Left move container to workspace prev
 bindsym $mod+Ctrl+Shift+Right move container to workspace next
-bindsym $mod+1 workspace number 1
-bindsym $mod+2 workspace number 2
-bindsym $mod+3 workspace number 3
-bindsym $mod+4 workspace number 4
-bindsym $mod+5 workspace number 5
-bindsym $mod+6 workspace number 6
-bindsym $mod+7 workspace number 7
-bindsym $mod+8 workspace number 8
-bindsym $mod+9 workspace number 9
+# Hold Super+digit to select via NuraLoumi's transient overlay.
+# The switcher sends the Sway workspace command immediately.
+set $ws_picker /usr/local/bin/nuraloumi-sway-workspace-switcher
+bindsym --no-repeat $mod+1 exec --no-startup-id $ws_picker 1
+bindsym --no-repeat $mod+2 exec --no-startup-id $ws_picker 2
+bindsym --no-repeat $mod+3 exec --no-startup-id $ws_picker 3
+bindsym --no-repeat $mod+4 exec --no-startup-id $ws_picker 4
+bindsym --no-repeat $mod+5 exec --no-startup-id $ws_picker 5
+bindsym --no-repeat $mod+6 exec --no-startup-id $ws_picker 6
+bindsym --no-repeat $mod+7 exec --no-startup-id $ws_picker 7
+bindsym --no-repeat $mod+8 exec --no-startup-id $ws_picker 8
+bindsym --no-repeat $mod+9 exec --no-startup-id $ws_picker 9
+# Either Super key closes the overlay when released.
+bindsym --release --no-repeat Super_L exec --no-startup-id $ws_picker --release
+bindsym --release --no-repeat Super_R exec --no-startup-id $ws_picker --release
 bindsym $mod+0 workspace number 10
 bindsym $mod+Shift+1 move container to workspace number 1
 bindsym $mod+Shift+2 move container to workspace number 2
@@ -148,8 +153,8 @@ bindsym $mod+Shift+e exec /opt/nuraloumi/current/nuraloumi-files --live
 bindsym $mod+u exec /usr/local/bin/sl101-cog-url
 bindsym $mod+b exec /usr/local/bin/sl101-browse
 
-# Original SL101 VT recovery shortcuts; keyd maps Super+1..7 to Ctrl+Alt+Fn
-# when a text VT is active. Use the existing audited chvt helper in Sway.
+# VT recovery: keyd emits Ctrl+Alt+Fn for RightAlt+LeftCtrl+1..9;
+# the console handles these directly; Sway uses the existing chvt helper.
 bindsym Ctrl+Mod1+F1 exec sudo /usr/local/bin/sl101-chvt 1
 bindsym Ctrl+Mod1+F2 exec sudo /usr/local/bin/sl101-chvt 2
 bindsym Ctrl+Mod1+F3 exec sudo /usr/local/bin/sl101-chvt 3
@@ -157,6 +162,8 @@ bindsym Ctrl+Mod1+F4 exec sudo /usr/local/bin/sl101-chvt 4
 bindsym Ctrl+Mod1+F5 exec sudo /usr/local/bin/sl101-chvt 5
 bindsym Ctrl+Mod1+F6 exec sudo /usr/local/bin/sl101-chvt 6
 bindsym Ctrl+Mod1+F7 exec sudo /usr/local/bin/sl101-chvt 7
+bindsym Ctrl+Mod1+F8 exec sudo /usr/local/bin/sl101-chvt 8
+bindsym Ctrl+Mod1+F9 exec sudo /usr/local/bin/sl101-chvt 9
 
 # Original SL101 audio controls: keep the tested ALSA mappings.
 bindsym XF86AudioRaiseVolume exec amixer -c 0 sset 'Speaker' 5%+ && amixer -c 0 sset 'Headphone' 5%+
@@ -164,7 +171,8 @@ bindsym XF86AudioLowerVolume exec amixer -c 0 sset 'Speaker' 5%- && amixer -c 0 
 
 # NuraLoumi panel owns the desktop/status shell; avoid desktop i3 programs
 # (picom/polybar/rofi/dunst/copyq/kitty), which aren't part of SL101.
-exec /opt/nuraloumi/current/nuraloumi-panel --live --enable-renderer-switch >>"$HOME/.local/state/nuraloumi-panel.log" 2>&1
+# Sway reload re-runs exec_always; hook serializes a single panel instance.
+exec_always /usr/local/bin/sl101-sway-panel
 bar {
     mode invisible
 }

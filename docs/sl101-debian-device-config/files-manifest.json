@@ -1,7 +1,7 @@
 [
   {
     "path": "/etc/keyd/sl101.conf",
-    "sha256": "08ee8b348ccc13cd050dd714bbb23fe08592ee8bb1d1613beb6d67570d3a3d21",
+    "sha256": "b91be7d5e318b3d2d0be8b9052689ac87d41b50ebe65c3fdb26d8832c99daf84",
     "mode": "0644",
     "owner": "root:root"
   },
@@ -43,7 +43,7 @@
   },
   {
     "path": "/home/user/.config/sway/config",
-    "sha256": "99d85a4a7a87e37d59f0de0b8e48cdc12bae43f9ca3f05b16081498e70ce025f",
+    "sha256": "fbfd55fd69f1254451b2871eaf6f7ec86e27ea0e7360683eeb26c56e9b2cf789",
     "mode": "0644",
     "owner": "session-user:session-user"
   },
@@ -67,7 +67,7 @@
   },
   {
     "path": "/usr/local/bin/sl101-chvt",
-    "sha256": "04a7c5278d4dea5ff4199abe8d819ce81079f90f6b6119ff8ffa777f0aa53aad",
+    "sha256": "d210218aee4d5672d80e20c0eca55f0004ce87200637627d779e43f216fee711",
     "mode": "0755",
     "owner": "root:root"
   },

@@ -10,7 +10,7 @@
   },
   {
     "source": "etc/keyd/sl101.conf",
-    "sha256": "08ee8b348ccc13cd050dd714bbb23fe08592ee8bb1d1613beb6d67570d3a3d21",
+    "sha256": "b91be7d5e318b3d2d0be8b9052689ac87d41b50ebe65c3fdb26d8832c99daf84",
     "mode": "0644",
     "decision": "copied",
     "destination": "etc/keyd/sl101.conf",

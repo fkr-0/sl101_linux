@@ -47,13 +47,13 @@
 
 The exact old file is backed up as `/var/lib/sl101-sway-i3-20261106/config.before` on the tablet. To revert only these Sway bindings without restarting the graphics device:
 
-    ssh root@192.168.23.106 sh /var/lib/sl101-sway-i3-20261106/rollback.sh
+    ssh user@192.168.23.106 'sudo -n sh /var/lib/sl101-sway-i3-20261106/rollback.sh'
 
 The rollback acquires the standard qualification lock, restores the old file, and requests `swaymsg reload`.
 
 To inspect the live config:
 
-    ssh root@192.168.23.106 'cat /home/user/.config/sway/config'
-    ssh root@192.168.23.106 'cat /etc/sl101-desktop-renderer.conf; cat /run/sl101-desktop.pid'
+    ssh user@192.168.23.106 'cat /home/user/.config/sway/config'
+    ssh user@192.168.23.106 'cat /etc/sl101-desktop-renderer.conf; cat /run/sl101-desktop.pid'
 
 The older NuraLoumi renderer label `Unknown` is not evidence for Pixman. Its running-renderer probe historically allowed only a `labwc` process name; the running executable is `sl101-sway`. Source fix lives separately in `/home/user/code/nuraloumi/crates/nuraloumi-providers/src/renderer.rs` (not yet deployed).
