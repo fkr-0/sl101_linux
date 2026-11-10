@@ -1,6 +1,6 @@
 #!/sbin/openrc-run
 name="SL101 remote desktop"
-description="Share the labwc display through localhost VNC"
+description="Share the active SL101 labwc/Sway display through localhost VNC"
 supervisor="supervise-daemon"
 command="/usr/bin/wayvnc"
 command_user="user:user"
@@ -12,6 +12,35 @@ output_log="/var/log/sl101-wayvnc.log"
 error_log="/var/log/sl101-wayvnc.log"
 export XDG_RUNTIME_DIR=/run/sl101-desktop-user
 export WAYLAND_DISPLAY=wayland-0
+
+# Sway can select wayland-1 while the previous compositor's wayland-0 socket
+# is being retired. Read the actual panel process environment rather than
+# assuming the socket name. Never connect remote clients to a stale socket.
+start_pre() {
+    local panel display i
+    i=0
+    while [ "$i" -lt 40 ]; do
+        panel=$(pidof nuraloumi-panel 2>/dev/null || true)
+        if [ -n "$panel" ]; then
+            panel=${panel%% *}
+            display=$(tr '\\000' '\\n' <"/proc/$panel/environ" 2>/dev/null \
+                | sed -n 's/^WAYLAND_DISPLAY=//p' | head -n 1)
+            case "$display" in
+                wayland-[0-9]*)
+                    if [ -S "$XDG_RUNTIME_DIR/$display" ]; then
+                        export WAYLAND_DISPLAY="$display"
+                        einfo "WayVNC: using active desktop socket $display"
+                        return 0
+                    fi
+                    ;;
+            esac
+        fi
+        i=$((i + 1))
+        sleep 0.25
+    done
+    eerror "WayVNC: no verified active panel/Wayland display found"
+    return 1
+}
 
 depend() {
     need localmount sl101-desktop

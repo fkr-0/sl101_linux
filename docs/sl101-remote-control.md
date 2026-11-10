@@ -34,7 +34,7 @@ For a manual tunnel (choose another local port if 5901 is already occupied):
 ```sh
 ssh -o ControlMaster=no -o ControlPath=none -o IdentitiesOnly=yes \
   -o StrictHostKeyChecking=yes -N \
-  -L 127.0.0.1:5902:127.0.0.1:5900 root@192.168.23.106
+  -L 127.0.0.1:5902:127.0.0.1:5900 user@192.168.23.106
 gvncviewer 127.0.0.1:2
 ```
 
@@ -57,8 +57,8 @@ The existing desktop terminal was left running. Smoke artifacts are in
 cold-boot tested; no reboot was needed for this deployment.
 
 ```sh
-ssh root@192.168.23.106 'rc-service sl101-wayvnc status'
-ssh root@192.168.23.106 'tail /var/log/sl101-wayvnc.log'
+ssh user@192.168.23.106 'sudo -n rc-service sl101-wayvnc status'
+ssh user@192.168.23.106 'sudo -n tail /var/log/sl101-wayvnc.log'
 ```
 
 To disable remote control, stop `sl101-wayvnc` and remove it from the default

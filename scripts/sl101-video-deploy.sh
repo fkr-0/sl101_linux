@@ -2,7 +2,8 @@
 # Hash-checked install of the *launcher only*. No package, boot or renderer change.
 set -eu
 
-TARGET=root@192.168.23.106
+TARGET=user@192.168.23.106
+# Privileged remote steps run via sudo -n as the device user.
 SOURCE=scripts/sl101-video-play.sh
 KNOWN_HOSTS=${SL101_KNOWN_HOSTS:-tmp/sl101-nura/deploy/known-hosts-sl101}
 DEST=/usr/local/bin/sl101-video-play
@@ -62,7 +63,7 @@ case "$stage" in /var/tmp/sl101-video-play.*) ;; *) echo 'unexpected remote stag
 scp $ssh_opts -o "UserKnownHostsFile=$KNOWN_HOSTS" "$SOURCE" "$TARGET:$stage"
 
 # shellcheck disable=SC2086
-ssh $ssh_opts -o "UserKnownHostsFile=$KNOWN_HOSTS" "$TARGET" "sh -s -- '$SHA' '$stage'" <<'REMOTE'
+ssh $ssh_opts -o "UserKnownHostsFile=$KNOWN_HOSTS" "$TARGET" "sudo -n sh -s -- '$SHA' '$stage'" <<'REMOTE'
 #!/bin/sh
 set -eu
 expected=$1

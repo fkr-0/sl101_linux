@@ -7,7 +7,7 @@ so it survives compositor stop/restart.
 
 Usage:
   On the SL101 (in tmux):  python3 sl101-video-tui.py [MEDIA_DIR]
-  From the host:           ssh root@192.168.23.106 python3 /path/sl101-video-tui.py
+  From the host:           ssh user@192.168.23.106 python3 /path/sl101-video-tui.py
 
 MEDIA_DIR defaults to /home/user.
 """
