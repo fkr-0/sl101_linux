@@ -1,0 +1,43 @@
+--- a/kernel/dma/direct.c
++++ b/kernel/dma/direct.c
+@@ -7,6 +7,7 @@
+ #include <linux/memblock.h> /* for max_pfn */
+ #include <linux/export.h>
+ #include <linux/mm.h>
++#include <linux/highmem.h>
+ #include <linux/dma-map-ops.h>
+ #include <linux/scatterlist.h>
+ #include <linux/pfn.h>
+@@ -186,6 +187,7 @@
+ 		dma_addr_t *dma_handle, gfp_t gfp)
+ {
+ 	struct page *page;
++	size_t offset;
+ 
+ 	page = __dma_direct_alloc_pages(dev, size, gfp & ~__GFP_ZERO, true);
+ 	if (!page)
+@@ -194,6 +196,24 @@
+ 	/* remove any dirty cache lines on the kernel alias */
+ 	if (!PageHighMem(page))
+ 		arch_dma_prep_coherent(page, size);
++
++	/*
++	 * No kernel mapping means that the return value is an opaque page
++	 * cookie, not that the DMA buffer can be left uninitialized.
++	 * Zero every page, including CMA and highmem allocations, and make
++	 * the initialized contents visible to non-coherent DMA devices.
++	 */
++	for (offset = 0; offset < size; offset += PAGE_SIZE) {
++		struct page *p = pfn_to_page(page_to_pfn(page) +
++						(offset >> PAGE_SHIFT));
++		void *vaddr = kmap_local_page(p);
++
++		memset(vaddr, 0, PAGE_SIZE);
++		if (!dev_is_dma_coherent(dev))
++			arch_sync_dma_for_device(page_to_phys(p),
++						 PAGE_SIZE, DMA_TO_DEVICE);
++		kunmap_local(vaddr);
++	}
+ 
+ 	/* return the page pointer as the opaque cookie */
+ 	*dma_handle = phys_to_dma_direct(dev, page_to_phys(page));
