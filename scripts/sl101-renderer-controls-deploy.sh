@@ -1,7 +1,8 @@
 #!/bin/sh
 # Install session controls without restarting labwc or changing the boot default.
 set -eu
-host=${1:-root@192.168.23.106}
+host=${1:-user@192.168.23.106}
+# Privileged remote steps run via sudo -n as the device user.
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 library=${2:-"$root/work/sl101-grate-production-20261004/libgallium-25.0.7.so"}
 wlroots=${3:-"$root/work/sl101-grate-production-20261004/wlroots-build/libwlroots-0.20.so"}
@@ -12,7 +13,7 @@ ssh "$host" "mkdir -p $stage"
 scp "$root/scripts/sl101-renderer-switch.py" "$root/scripts/sl101-user-session/sl101-renderer-verify" "$root/scripts/sl101-user-session/sl101-desktop" "$root/scripts/sl101-user-session/wayvnc.init" "$host:$stage/"
 scp "$library" "$host:$stage/libgallium-25.0.7.so"
 scp "$wlroots" "$host:$stage/libwlroots-0.20.so"
-ssh "$host" sh -s <<'REMOTE'
+ssh "$host" 'sudo -n sh -s' <<'REMOTE'
 set -eu
 [ "$(cat /etc/hostname)" = sl101-nura ]
 [ "$(cat /sys/block/mmcblk1/device/cid)" = 035344534c31323880ac79a543010300 ]

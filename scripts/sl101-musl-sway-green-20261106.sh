@@ -3,7 +3,8 @@
 # Default: dry-run. Explicit --apply is required for live Sway changes.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TARGET="${SL101_TARGET:-root@192.168.23.106}"
+TARGET="${SL101_TARGET:-user@192.168.23.106}"
+# Privileged remote steps run via sudo -n as the device user.
 ARCHIVE="$ROOT/work/sl101-grate-musl-20261106/grate-mesa25-musl-20261106.tar.gz"
 EXPECTED="09dc5991a18c3449c163c5ff8f8426f5d3e0f0a7a0210a764b055e19395234db"
 PREFIX="/opt/grate-mesa25-musl-20261106"
@@ -26,28 +27,30 @@ case "${1:---dry-run}" in
   *) die "usage: $0 [--dry-run|--apply]" ;;
 esac
 
-"${SSH[@]}" "$TARGET" "set -eu
-  test \"\$(uname -r)\" = 7.0.1-postmarketos-grate
-  test \"\$(cat /sys/block/mmcblk1/device/cid)\" = 035344534c31323880ac79a543010300
-  grep -qx SL101_DESKTOP_RENDERER=grate /etc/sl101-desktop-renderer.conf
-  grep -qx SL101_COMPOSITOR=sway /etc/sl101-desktop-renderer.conf
-  grep -Fxq 'GRATE_PREFIX=$OLD_PREFIX' /usr/local/bin/sl101-desktop
-  test ! -e $STATE
-  /usr/local/sbin/sl101-renderer-verify >/dev/null
-"
+"${SSH[@]}" "$TARGET" 'sudo -n sh -s' <<'PRECONDITIONS'
+set -eu
+test "$(uname -r)" = 7.0.1-postmarketos-grate
+test "$(cat /sys/block/mmcblk1/device/cid)" = 035344534c31323880ac79a543010300
+grep -qx SL101_DESKTOP_RENDERER=grate /etc/sl101-desktop-renderer.conf
+grep -qx SL101_COMPOSITOR=sway /etc/sl101-desktop-renderer.conf
+grep -Fxq 'GRATE_PREFIX=/usr/local/lib/sl101-grate-38b7bd1f600d2889a3caeec609e7520842701eab8aa10193f98966ce4e33987c' /usr/local/bin/sl101-desktop
+test ! -e /run/sl101-musl-sway-green-20261106
+/usr/local/sbin/sl101-renderer-verify >/dev/null
+PRECONDITIONS
 # Atomic upload and separate install prefix; no system .so or ld-musl.path replaced.
 "${SCP[@]}" "$ARCHIVE" "$TARGET:$REMOTE_ARCHIVE"
-"${SSH[@]}" "$TARGET" "set -eu
-  test \"\$(sha256sum '$REMOTE_ARCHIVE' | cut -d ' ' -f1)\" = '$EXPECTED'
-  if test ! -d '$PREFIX'; then
-     tar -xzf '$REMOTE_ARCHIVE' -C /
-  fi
-  test -f '$PREFIX/lib/libgallium-25.0.7.so'
-  LD_LIBRARY_PATH='$PREFIX/lib' /lib/ld-musl-armhf.so.1 --list '$PREFIX/lib/libEGL.so.1.0.0' >/dev/null
-"
+"${SSH[@]}" "$TARGET" 'sudo -n sh -s' <<'EXTRACT'
+set -eu
+test "$(sha256sum '/tmp/sl101-grate-mesa25-musl-20261106.tar.gz' | cut -d ' ' -f1)" = '09dc5991a18c3449c163c5ff8f8426f5d3e0f0a7a0210a764b055e19395234db'
+if test ! -d '/opt/grate-mesa25-musl-20261106'; then
+   tar -xzf '/tmp/sl101-grate-mesa25-musl-20261106.tar.gz' -C /
+fi
+test -f '/opt/grate-mesa25-musl-20261106/lib/libgallium-25.0.7.so'
+LD_LIBRARY_PATH='/opt/grate-mesa25-musl-20261106/lib' /lib/ld-musl-armhf.so.1 --list '/opt/grate-mesa25-musl-20261106/lib/libEGL.so.1.0.0' >/dev/null
+EXTRACT
 # Remote preparation: launcher is copied verbatim first, rollback disarmed only
 # after exact pid+library-map proof and a successful Sway background command.
-"${SSH[@]}" "$TARGET" sh -s <<'REMOTE'
+"${SSH[@]}" "$TARGET" 'sudo -n sh -s' <<'REMOTE'
 set -eu
 STATE=/run/sl101-musl-sway-green-20261106
 LAUNCHER=/usr/local/bin/sl101-desktop
@@ -82,14 +85,14 @@ echo "ROLLBACK_ARMED_PID=$!"
 REMOTE
 
 # Restart only the OpenRC-owned desktop; must not spawn a second DRM compositor.
-if ! "${SSH[@]}" "$TARGET" "rc-service sl101-desktop restart"; then
-  "${SSH[@]}" "$TARGET" "sh '$STATE/rollback.sh'" || true
+if ! "${SSH[@]}" "$TARGET" "sudo -n rc-service sl101-desktop restart"; then
+  "${SSH[@]}" "$TARGET" "sudo -n sh '$STATE/rollback.sh'" || true
   die "restart failed; rollback requested"
 fi
 
 healthy=0
 for _attempt in $(seq 1 28); do
-  if "${SSH[@]}" "$TARGET" sh -s <<'HEALTH' >/dev/null 2>&1
+  if "${SSH[@]}" "$TARGET" 'sudo -n sh -s' <<'HEALTH' >/dev/null 2>&1
 set -eu
 PID=$(cat /run/sl101-desktop.pid)
 test -r "/proc/$PID/maps"
@@ -104,12 +107,12 @@ HEALTH
   sleep 1
 done
 if test "$healthy" != 1; then
-  "${SSH[@]}" "$TARGET" "sh '$STATE/rollback.sh'" || true
+  "${SSH[@]}" "$TARGET" "sudo -n sh '$STATE/rollback.sh'" || true
   die "Sway never reached EGL+Grate+IPC health; rollback requested"
 fi
 
 # Green background only after verifiably loading the NEW Mesa libraries.
-if ! "${SSH[@]}" "$TARGET" sh -s <<'GREEN'
+if ! "${SSH[@]}" "$TARGET" 'sudo -n sh -s' <<'GREEN'
 set -eu
 STATE=/run/sl101-musl-sway-green-20261106
 CFG=/home/user/.config/sway/config
@@ -126,8 +129,14 @@ touch "$STATE/success"
 echo "SUCCESS_NEW_MESA_SWAY_AND_GREEN_BG PID=$PID"
 GREEN
 then
-  "${SSH[@]}" "$TARGET" "sh '$STATE/rollback.sh'" || true
+  "${SSH[@]}" "$TARGET" "sudo -n sh '$STATE/rollback.sh'" || true
   die "Green swaybg command failed; rollback requested"
 fi
-"${SSH[@]}" "$TARGET" "PID=\$(cat /run/sl101-desktop.pid); echo SWAY_PID=\$PID; grep -m 1 -E '/opt/grate-mesa25-musl-20261106/lib/lib(gallium|EGL)' /proc/\$PID/maps; cat '$STATE/success' >/dev/null; ls -l '$STATE/launcher.before' '$STATE/sway-config.before'"
+"${SSH[@]}" "$TARGET" 'sudo -n sh -s' <<'FINAL'
+PID=$(cat /run/sl101-desktop.pid)
+echo "SWAY_PID=$PID"
+grep -m 1 -E '/opt/grate-mesa25-musl-20261106/lib/lib(gallium|EGL)' "/proc/$PID/maps"
+cat /run/sl101-musl-sway-green-20261106/success >/dev/null
+ls -l /run/sl101-musl-sway-green-20261106/launcher.before /run/sl101-musl-sway-green-20261106/sway-config.before
+FINAL
 printf 'SUCCESS: Sway now uses new musl Mesa and green background; preserved rollback in %s\n' "$STATE"

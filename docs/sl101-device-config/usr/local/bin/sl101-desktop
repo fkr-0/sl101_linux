@@ -19,26 +19,31 @@ chmod 700 "$XDG_RUNTIME_DIR"
 unset LD_LIBRARY_PATH GBM_BACKENDS_PATH LIBGL_DRIVERS_PATH MESA_LOADER_DRIVER_OVERRIDE
 WLR_RENDERER=pixman
 GRATE_PREFIX=/usr/local/lib/sl101-grate-38b7bd1f600d2889a3caeec609e7520842701eab8aa10193f98966ce4e33987c
+# --- renderer decision begin (extracted by tests)
+RENDER_REASON="$SL101_DESKTOP_RENDERER requested"
 case "$SL101_DESKTOP_RENDERER" in
   grate)
-    if [ "$(uname -r)" = 7.0.1-postmarketos-grate ] &&
-       /usr/local/sbin/sl101-renderer-verify >/dev/null 2>&1; then
+    if verify_out=$(/usr/local/sbin/sl101-renderer-verify 2>&1); then
       WLR_RENDERER=gles2
       export WLR_RENDERER_ALLOW_SOFTWARE=0
-      LD_LIBRARY_PATH="$GRATE_PREFIX/lib"
+      LD_LIBRARY_PATH="/usr/local/lib/sl101-libdrm-import-lists-5b06215a2876fec6:$GRATE_PREFIX/lib"
       GBM_BACKENDS_PATH="$GRATE_PREFIX/lib/gbm"
       LIBGL_DRIVERS_PATH="$GRATE_PREFIX/lib"
       MESA_LOADER_DRIVER_OVERRIDE=grate
-      export LD_LIBRARY_PATH GBM_BACKENDS_PATH LIBGL_DRIVERS_PATH MESA_LOADER_DRIVER_OVERRIDE
+      LD_PRELOAD=/usr/local/lib/gr3d_serialize.so
+      export LD_LIBRARY_PATH GBM_BACKENDS_PATH LIBGL_DRIVERS_PATH MESA_LOADER_DRIVER_OVERRIDE LD_PRELOAD
+      RENDER_REASON="Grate bundle verified, GPU compositor"
     else
-      echo "sl101-desktop: Grate kernel/bundle unavailable; starting recovery pixman" >&2
+      RENDER_REASON="FALLBACK to PIXMAN: Grate bundle check failed: $(printf '%s' "$verify_out" | tail -n 1)"
+      echo "sl101-desktop: $RENDER_REASON" >&2
     fi
     ;;
   pixman) ;;
   *) echo "invalid SL101_DESKTOP_RENDERER=$SL101_DESKTOP_RENDERER" >&2; exit 1 ;;
 esac
+# --- renderer decision end
 export WLR_RENDERER
-printf 'sl101-desktop: requested=%s renderer=%s kernel=%s\n' "$SL101_DESKTOP_RENDERER" "$WLR_RENDERER" "$(uname -r)" >&2
+printf 'sl101-desktop: requested=%s renderer=%s kernel=%s reason=%s\n' "$SL101_DESKTOP_RENDERER" "$WLR_RENDERER" "$(uname -r)" "$RENDER_REASON" >&2
 
 rm -f "$SL101_DBUS_SOCKET"
 dbus_pid=$(dbus-daemon --session --fork \
@@ -52,7 +57,53 @@ if ! /usr/local/bin/sl101-audio-session start; then
   echo "sl101-desktop: audio session failed; continuing desktop without managed audio" >&2
 fi
 
-if [ -n "${SL101_LABWC_CONFIG_DIR:-}" ]; then
-	exec labwc -V -C "$SL101_LABWC_CONFIG_DIR"
-fi
-exec labwc -V
+: "${SL101_COMPOSITOR:=labwc}"
+printf 'sl101-desktop: compositor=%s\n' "$SL101_COMPOSITOR" >&2
+# --- status writer begin (extracted by tests)
+# Transparent renderer truth for panels and launchers (read by sl101-cog-control status).
+# Writing it must never stop the desktop from starting.
+case "$WLR_RENDERER" in
+  gles2) RENDER_ACTUAL="GLES2/EGL via Grate (GPU)" ;;
+  pixman) RENDER_ACTUAL="PIXMAN (software, CPU)" ;;
+  *) RENDER_ACTUAL="$WLR_RENDERER" ;;
+esac
+write_render_status() {
+  {
+    printf 'compositor=%s\n' "$SL101_COMPOSITOR"
+    printf 'backend=DRM/KMS (wlroots drm backend)\n'
+    printf 'requested=%s\n' "$SL101_DESKTOP_RENDERER"
+    printf 'wlr_renderer=%s\n' "$WLR_RENDERER"
+    printf 'actual=%s\n' "$RENDER_ACTUAL"
+    printf 'reason=%s\n' "$RENDER_REASON"
+    printf 'kernel=%s\n' "$(uname -r)"
+    printf 'prefix=%s\n' "$GRATE_PREFIX"
+  } >"${SL101_RENDER_STATUS:-/run/sl101-render-status}.new"
+  chmod 644 "${SL101_RENDER_STATUS:-/run/sl101-render-status}.new"
+  mv "${SL101_RENDER_STATUS:-/run/sl101-render-status}.new" "${SL101_RENDER_STATUS:-/run/sl101-render-status}"
+}
+write_render_status || echo 'sl101-desktop: could not write /run/sl101-render-status' >&2
+# --- status writer end
+
+case "$SL101_COMPOSITOR" in
+  sway)
+    # The packaged /usr/sbin/sway has cap_sys_nice=ep. On musl, file capabilities
+    # cause a secure exec which ignores LD_LIBRARY_PATH/LD_PRELOAD at load time.
+    # A root-owned no-filecap copy retains the pinned native Grate EGL/wlroots.
+    # Do not change the packaged binary's security xattr.
+    if [ ! -x /usr/local/bin/sl101-sway ]; then
+      echo 'sl101-desktop: missing verified no-filecap /usr/local/bin/sl101-sway' >&2
+      exit 1
+    fi
+    exec /usr/local/bin/sl101-sway
+    ;;
+  labwc)
+    if [ -n "${SL101_LABWC_CONFIG_DIR:-}" ]; then
+      exec labwc -V -C "$SL101_LABWC_CONFIG_DIR"
+    fi
+    exec labwc -V
+    ;;
+  *)
+    echo "sl101-desktop: unknown compositor '$SL101_COMPOSITOR'; falling back to labwc" >&2
+    exec labwc -V
+    ;;
+esac

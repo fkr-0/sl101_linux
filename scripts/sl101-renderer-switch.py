@@ -22,8 +22,6 @@ OVERRIDE = Path('/run/sl101-desktop-renderer.conf')
 LOCK = Path('/run/lock/sl101-nura-qualification.lock')
 
 def validate_grate(prefix=PREFIX):
-    if os.uname().release != '7.0.1-postmarketos-grate':
-        raise RuntimeError('Grate kernel mismatch')
     for link in prefix.rglob('*'):
         if link.is_symlink():
             resolved = link.resolve(strict=True)
