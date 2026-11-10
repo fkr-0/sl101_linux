@@ -6,7 +6,7 @@ The gate compares the config embedded in the running kernel with the installed
 loads/unloads modules, writes boot files, or changes the target.
 
 Typical live use:
-    python scripts/sl101-kernel-coherence.py --ssh root@192.168.23.106
+    python scripts/sl101-kernel-coherence.py --ssh user@192.168.23.106
 
 Fixture/local-root use:
     python scripts/sl101-kernel-coherence.py --root /path/to/root
