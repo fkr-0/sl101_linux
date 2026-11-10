@@ -55,15 +55,20 @@ test('offline-qualification', py,
   env: ['NURABROWSER_SOURCE_DIR=' + meson.project_source_root()],
   timeout: 120)
 
-+# These three scripts compile/run only small native GLib test doubles on the
-+# build host. They never invoke a cross-built ARM executable or any device.
-+shell = find_program('sh')
-+test('engine-options-host', shell,
-+  args: [meson.project_source_root() / 'src/engine/tests/run-host-smoke.sh'],
-+  timeout: 120)
-+test('navigation-host', shell,
-+  args: [meson.project_source_root() / 'src/navigation/tests/run-host-tests.sh'],
-+  timeout: 120)
-+test('control-ipc-host', shell,
-+  args: [meson.project_source_root() / 'src/control/tests/run-host-tests.sh'],
-+  timeout: 120)
+# These three scripts compile/run only small native GLib test doubles on the
+# build host. They never invoke a cross-built ARM executable or any device.
+shell = find_program('sh')
+test('engine-options-host', shell,
+  args: [meson.project_source_root() / 'src/engine/tests/run-host-smoke.sh'],
+  timeout: 120)
+test('navigation-host', shell,
+  args: [meson.project_source_root() / 'src/navigation/tests/run-host-tests.sh'],
+  timeout: 120)
+test('control-ipc-host', shell,
+  args: [meson.project_source_root() / 'src/control/tests/run-host-tests.sh'],
+  timeout: 120)
+# A real link of worker B + worker C implementation through AF_UNIX;
+# fake WebKit type/behavior exists only inside this CPU integration test.
+test('navigation-control-integration-host', shell,
+  args: [meson.project_source_root() / 'tests/run-crosslane-host.sh'],
+  timeout: 120)
