@@ -70,11 +70,45 @@ the original extlinux and VDE module, installs the patched VDE module,
 verifies the entire updated module tree, and only **then** atomically
 updates SD extlinux. `verify`, `load`, `execute` are separate
 actions; `execute` requires a confirmed loaded candidate marker.
-A rollback helper restores the prior SD default and prior VDE module
-but only on the stock running kernel.
+The host-pinned, 601-entry on-device module checksum index is copied into
+the root-owned state directory before mutation so it survives reboot.
+The one-shot kexec marker also contains the current boot ID.
+
+A rollback helper restores the prior SD default and prior VDE module,
+including when staging was interrupted before writing its receipt. It
+runs only on the stock kernel, refuses unknown states or pending kexec,
+and preserves evidence in a distinct `.rolledback-<boot-id>` directory.
 
 After reboot, confirm exact release, VDE module SHA, boot command line,
 active kernel logs, Wi-Fi/SSH, EC modules, LVDS/Grate, Sway/WayVNC and
 input without unsafe suspend tests. Current RC2 VDE behavior has NOT
 yet passed hardware video/decoder testing: the first boot validates
 basics; acceptance of VDE/KMS video remains its own gate.
+
+## Actual supervised .106 rollout (2026-11-10)
+
+**Verified directly before handoff:**
+
+- Target: `sl101-nura`, SD CID `035344534c31323880ac79a543010300`,
+  running stock `7.0.1-postmarketos-grate`, external AC online.
+- Full original 601-entry module manifest verified; after installing the
+  current VDE fix, the complete RC2 manifest passed and patched VDE module
+  SHA-256 was `9996fee6495a93374c4cf92f0ec942debae29b872d2429f07e35e63604531f4f`.
+- SD/APX extlinux default atomically changed to `dmafix1-prod-candidate`;
+  extlinux SHA-256 `17e3b857376c8610f036110024a6d6f05592fd6ac6280c218106e5e8d632b13d`.
+- Original extlinux and VDE module preserved under
+  `/var/lib/sl101-dmafix1-prod-candidate-20261110/`:
+  SHA-256 `06082cd3d3efb86bc7a91e81a1127dabb7465dfd0b65753c6b37afc7fff4afaf`
+  and `1071962fe35550908ae9f02c28596a9321a0bd3c4de5aca1c6ad8f908dc9a96c`.
+- One-shot `kexec -l` succeeded, `kexec_loaded=1`. Root-owned marker
+  records image SHA `315a49d41d590ee01eef59745fd0473e8e10f00fe547318f5b95d1219e0c4541`
+  and boot ID `d1f3ff6d-e125-425a-b6b1-3021091906fc`.
+- Explicitly authorized `execute` reverified the full module tree and
+  emitted `DMAFIX1_ONE_SHOT_REBOOT_NOW` immediately before `kexec -e`.
+
+**Postboot not yet confirmed:** SSH timed out and ARP/ping did not answer
+immediately after handoff. This proves the handoff was issued, NOT that
+the candidate finished booting. No postboot VDE/KMS or Cog test was
+performed. With physical access, a cold power cycle returns via the
+unchanged internal stock boot path if the candidate hangs. Do not blindly
+retry kexec or rewrite eMMC.

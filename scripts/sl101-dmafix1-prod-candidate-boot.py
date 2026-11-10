@@ -33,6 +33,8 @@ DTB = BOOT / "tegra20-asus-sl101.dtb"
 CONF = BOOT / "extlinux/extlinux.conf"
 STATE = Path("/var/lib/sl101-dmafix1-prod-candidate-20261110")
 LOCK = Path("/run/lock/sl101-nura-qualification.lock")
+KEXEC_LOADED = Path("/sys/kernel/kexec_loaded")
+BOOT_ID = Path("/proc/sys/kernel/random/boot_id")
 MODULE = Path("/lib/modules") / CANDIDATE
 MANIFEST_STAGE = Path("/tmp/sl101-dmafix1-rc2-modules.sha256")
 MANIFEST = STATE / "modules.sha256"
@@ -175,7 +177,7 @@ def verify_stage():
 def stage():
     require_power()
     validate_target()
-    require(Path("/sys/kernel/kexec_loaded").read_text().strip() == "0",
+    require(KEXEC_LOADED.read_text().strip() == "0",
             "unrelated kexec already loaded")
     require(sha(SOURCE) == KERNEL_SHA, "candidate source hash mismatch")
     require(sha(DTB) == DTB_SHA, "DTB hash mismatch")
@@ -243,7 +245,7 @@ def load():
     validate_target()
     verify_stage()
     module_check()
-    require(Path("/sys/kernel/kexec_loaded").read_text().strip() == "0",
+    require(KEXEC_LOADED.read_text().strip() == "0",
             "kexec image already loaded; refusing overwrite")
     require(Path("/proc/cmdline").read_text().strip() == CMDLINE,
             "running root command line does not match candidate")
@@ -252,9 +254,9 @@ def load():
          "--command-line=" + CMDLINE], timeout=30, capture_output=True, text=True
     )
     require(result.returncode == 0, "kexec load failed: " + result.stderr[-600:])
-    require(Path("/sys/kernel/kexec_loaded").read_text().strip() == "1",
+    require(KEXEC_LOADED.read_text().strip() == "1",
             "kexec load did not set kexec_loaded=1")
-    boot_id = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    boot_id = BOOT_ID.read_text().strip()
     atomically(STATE / "kexec-loaded", (KERNEL_SHA + " " + boot_id + "\n").encode(), mode=0o600)
     os.sync()
     print("DMAFIX1_KEXEC_LOADED_NOT_EXECUTED", KERNEL_SHA)
@@ -264,9 +266,9 @@ def execute():
     require_power()
     validate_target()
     verify_stage()
-    require(Path("/sys/kernel/kexec_loaded").read_text().strip() == "1",
+    require(KEXEC_LOADED.read_text().strip() == "1",
             "no loaded kexec candidate")
-    boot_id = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    boot_id = BOOT_ID.read_text().strip()
     require((STATE / "kexec-loaded").read_text().strip() ==
             KERNEL_SHA + " " + boot_id,
             "loaded candidate provenance or boot-ID marker missing")
@@ -276,23 +278,45 @@ def execute():
 
 
 def rollback():
+    # This action also recovers a partially staged candidate if the process
+    # died after making its backups but before writing extlinux/receipt.
+    # No pending kexec may survive a default/driver rollback.
     validate_target(require_stock=True)
-    require(os.uname().release == STOCK,
-            "rollback module restore requires stock running kernel")
-    require(STATE.is_dir(), "no candidate receipt/backup")
-    verify_stage()
-    original = (STATE / "extlinux.before").read_bytes()
-    require(hashlib.sha256(original).hexdigest() == OLD_CONF_SHA, "backup hash mismatch")
-    atomically(CONF, original)
-    require(sha(CONF) == OLD_CONF_SHA, "rollback readback failed")
-    # Restore the original VDE module too, but only on stock kernel (a
-    # running candidate may be using this module and its dependency indices).
-    original_vde = (STATE / "tegra-vde.before.ko.zst").read_bytes()
-    require(hashlib.sha256(original_vde).hexdigest() == VDE_OLD_SHA,
-            "original VDE module backup mismatch")
-    atomically(VDE_MODULE, original_vde)
-    require(sha(VDE_MODULE) == VDE_OLD_SHA, "VDE rollback mismatch")
-    print("DMAFIX1_APX_DEFAULT_ROLLED_BACK")
+    require(KEXEC_LOADED.read_text().strip() == "0",
+            "pending kexec must be unloaded first")
+    require(STATE.is_dir(), "no candidate backup/evidence")
+    saved_conf = STATE / "extlinux.before"
+    require(saved_conf.is_file() and sha(saved_conf) == OLD_CONF_SHA,
+            "original extlinux backup missing or tampered")
+    original = saved_conf.read_bytes()
+    candidate = updated_conf(original)
+    current_conf = CONF.read_bytes()
+    require(current_conf in (original, candidate),
+            "extlinux changed outside known candidate/stock states")
+    current_vde = sha(VDE_MODULE)
+    require(current_vde in (VDE_OLD_SHA, VDE_NEW_SHA),
+            "VDE module changed outside candidate/stock states")
+    old_vde = STATE / "tegra-vde.before.ko.zst"
+    if current_vde == VDE_NEW_SHA:
+        require(old_vde.is_file() and sha(old_vde) == VDE_OLD_SHA,
+                "original VDE module backup missing or tampered")
+
+    # First restore the stock extlinux default, so interruption cannot
+    # reboot the candidate with a reverted VDE module.
+    if current_conf != original:
+        atomically(CONF, original)
+    require(sha(CONF) == OLD_CONF_SHA, "rollback extlinux readback failed")
+    if current_vde == VDE_NEW_SHA:
+        atomically(VDE_MODULE, old_vde.read_bytes())
+    require(sha(VDE_MODULE) == VDE_OLD_SHA, "rollback VDE module readback failed")
+
+    # Preserve all evidence and permit a later fresh staged attempt.
+    bootid = BOOT_ID.read_text().strip()
+    archive = STATE.with_name(STATE.name + ".rolledback-" + bootid)
+    require(not archive.exists(), "rollback evidence destination already exists")
+    os.replace(STATE, archive)
+    os.sync()
+    print("DMAFIX1_APX_DEFAULT_ROLLED_BACK", "evidence="+str(archive))
 
 
 def main():

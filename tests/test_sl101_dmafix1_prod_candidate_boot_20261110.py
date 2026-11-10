@@ -3,6 +3,8 @@ from pathlib import Path
 import hashlib
 import importlib.util
 import subprocess
+import tempfile
+from unittest import mock
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,6 +62,64 @@ class Dmafix1BootTests(unittest.TestCase):
         MODULE.OLD_CONF_SHA = hashlib.sha256(modified).hexdigest()
         with self.assertRaises(MODULE.Guard):
             MODULE.updated_conf(modified)
+
+    def test_interrupted_stage_rollback_restores_original_files(self):
+        self._rollback_fixture(new_vde=True, changed_config=True)
+
+    def test_rollback_before_vde_backup_does_not_require_it(self):
+        self._rollback_fixture(new_vde=False, changed_config=False,
+                               include_vde_backup=False)
+
+    def test_rollback_rejects_changed_foreign_extlinux(self):
+        with self.assertRaises(MODULE.Guard):
+            self._rollback_fixture(new_vde=True, changed_config=True,
+                                   foreign_config=True)
+
+    def test_rollback_rejects_pending_kexec(self):
+        with self.assertRaises(MODULE.Guard):
+            self._rollback_fixture(new_vde=True, changed_config=True,
+                                   pending_kexec=True)
+
+    def test_rollback_rejects_missing_vde_backup(self):
+        with self.assertRaises(MODULE.Guard):
+            self._rollback_fixture(new_vde=True, changed_config=True,
+                                   include_vde_backup=False)
+
+    def _rollback_fixture(self, *, new_vde, changed_config,
+                          include_vde_backup=True, foreign_config=False,
+                          pending_kexec=False):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state = root / "state"
+            state.mkdir()
+            (state / "extlinux.before").write_bytes(OLD)
+            conf = root / "extlinux.conf"
+            conf.write_bytes(
+                b"foreign config" if foreign_config else
+                MODULE.updated_conf(OLD) if changed_config else OLD
+            )
+            vde = root / "tegra-vde.ko.zst"
+            old_vde, fixed_vde = b"old-vde-module", b"fixed-vde-module"
+            vde.write_bytes(fixed_vde if new_vde else old_vde)
+            if include_vde_backup:
+                (state / "tegra-vde.before.ko.zst").write_bytes(old_vde)
+            kexec_state = root / "kexec_loaded"
+            kexec_state.write_text("1" if pending_kexec else "0")
+            boot_id = root / "boot_id"
+            boot_id.write_text("boot-id-for-test")
+            with mock.patch.multiple(
+                MODULE, STATE=state, CONF=conf, VDE_MODULE=vde,
+                KEXEC_LOADED=kexec_state, BOOT_ID=boot_id,
+                VDE_OLD_SHA=hashlib.sha256(old_vde).hexdigest(),
+                VDE_NEW_SHA=hashlib.sha256(fixed_vde).hexdigest(),
+            ), mock.patch.object(MODULE, "validate_target"):
+                MODULE.rollback()
+            self.assertEqual(conf.read_bytes(), OLD)
+            self.assertEqual(vde.read_bytes(), old_vde)
+            self.assertFalse(state.exists())
+            archive = root / "state.rolledback-boot-id-for-test"
+            self.assertTrue(archive.is_dir())
+            self.assertEqual((archive / "extlinux.before").read_bytes(), OLD)
 
     def test_scripts_parse(self):
         r = subprocess.run(["python3", "-m", "py_compile", str(BOOT)],
