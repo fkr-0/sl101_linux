@@ -34,15 +34,20 @@ CONF = BOOT / "extlinux/extlinux.conf"
 STATE = Path("/var/lib/sl101-dmafix1-prod-candidate-20261110")
 LOCK = Path("/run/lock/sl101-nura-qualification.lock")
 MODULE = Path("/lib/modules") / CANDIDATE
-MANIFEST = Path("/tmp/sl101-dmafix1-rc2-modules.sha256")
+MANIFEST_STAGE = Path("/tmp/sl101-dmafix1-rc2-modules.sha256")
+MANIFEST = STATE / "modules.sha256"
 BASE_MANIFEST = Path("/tmp/sl101-dmafix1-module-verify.sha256")
+BASE_MANIFEST_SHA = "0c96cab49bc5f154a2a5793ab653edcf6f4789ae1a05e7bdc43c974b21977997"
+MANIFEST_SHA = "52e096e120a522708069f2fdc460df544df04ac1cf98170a007eecfc2d9f8e7c"
 STAGED_VDE = Path("/tmp/sl101-dmafix1-vde-rc2.ko.zst")
 VDE_MODULE = MODULE / "kernel/drivers/media/platform/nvidia/tegra-vde/tegra-vde.ko.zst"
 VDE_OLD_SHA = "1071962fe35550908ae9f02c28596a9321a0bd3c4de5aca1c6ad8f908dc9a96c"
 VDE_NEW_SHA = "9996fee6495a93374c4cf92f0ec942debae29b872d2429f07e35e63604531f4f"
 VDE_PATCH_SHA = "d93fc2f5924005a8f1abbe902df3ecbe753614f5dc520840c1d2b6e48e23e0de"
+# The complete self-contained RC is verified and retained on the host.
+# The tablet already holds the matching kernel and 587 modules; transfer
+# only the missing VDE binary plus full module checksum manifest.
 RC_ARCHIVE_SHA = "02c4c66cabef1560765e72a358a225e86ac00f5d75dbe905f288e6faab666912"
-RC_ARCHIVE = Path("/tmp/sl101-dmafix1-vde-rc2-complete.tar.zst")
 
 
 class Guard(Exception):
@@ -132,7 +137,9 @@ def module_check(base=False):
     require(VDE_MODULE.is_file() and not VDE_MODULE.is_symlink()
             and sha(VDE_MODULE) == expected, "installed VDE module SHA mismatch")
     manifest = BASE_MANIFEST if base else MANIFEST
-    require(manifest.is_file(), "missing host-pinned complete module SHA256 manifest")
+    expected_manifest_sha = BASE_MANIFEST_SHA if base else MANIFEST_SHA
+    require(manifest.is_file() and sha(manifest) == expected_manifest_sha,
+            "missing/tampered host-pinned module manifest")
     # GNU and BusyBox both return nonzero on any missing/mismatching file.
     with open(os.devnull, "wb") as null:
         result = subprocess.run(["sha256sum", "-c", str(manifest)],
@@ -157,8 +164,6 @@ def verify_stage():
             "candidate receipt mismatch")
     require(sha(DTB) == DTB_SHA, "candidate DTB drift")
     module_check()
-    require(sha(STATE / "candidate.tar.zst") == RC_ARCHIVE_SHA,
-            "installed complete RC archive hash mismatch")
     require(receipt["vde_module_sha256"] == VDE_NEW_SHA and
             receipt["vde_patch_sha256"] == VDE_PATCH_SHA and
             receipt["complete_candidate_sha256"] == RC_ARCHIVE_SHA,
@@ -183,17 +188,16 @@ def stage():
     module_check(base=True)
     require(STAGED_VDE.is_file() and not STAGED_VDE.is_symlink()
             and sha(STAGED_VDE) == VDE_NEW_SHA, "complete RC VDE payload mismatch")
-    require(MANIFEST.is_file(), "complete RC module SHA256 manifest absent")
-    require(RC_ARCHIVE.is_file() and not RC_ARCHIVE.is_symlink()
-            and sha(RC_ARCHIVE) == RC_ARCHIVE_SHA, "complete RC artifact hash mismatch")
+    require(MANIFEST_STAGE.is_file() and sha(MANIFEST_STAGE) == MANIFEST_SHA,
+            "complete RC module SHA256 manifest absent or drifted")
     old = CONF.read_bytes()
     new = updated_conf(old)
     require(not TARGET.exists(), "candidate destination already exists without receipt")
     STATE.mkdir(mode=0o700)
     atomically(STATE / "extlinux.before", old, mode=0o600)
-    atomically(STATE / "candidate.tar.zst", RC_ARCHIVE.read_bytes(), mode=0o600)
-    require(sha(STATE / "candidate.tar.zst") == RC_ARCHIVE_SHA,
-            "persisted complete RC archive changed")
+    # Persist the signed-off manifest: /tmp can be cleared on reboot.
+    atomically(MANIFEST, MANIFEST_STAGE.read_bytes(), mode=0o600)
+    require(sha(MANIFEST) == MANIFEST_SHA, "persisted manifest drift")
     atomically(STATE / "tegra-vde.before.ko.zst", VDE_MODULE.read_bytes(), mode=0o600)
     require(sha(STATE / "tegra-vde.before.ko.zst") == VDE_OLD_SHA,
             "VDE original backup not verified")
@@ -250,7 +254,8 @@ def load():
     require(result.returncode == 0, "kexec load failed: " + result.stderr[-600:])
     require(Path("/sys/kernel/kexec_loaded").read_text().strip() == "1",
             "kexec load did not set kexec_loaded=1")
-    atomically(STATE / "kexec-loaded", (KERNEL_SHA + "\n").encode(), mode=0o600)
+    boot_id = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    atomically(STATE / "kexec-loaded", (KERNEL_SHA + " " + boot_id + "\n").encode(), mode=0o600)
     os.sync()
     print("DMAFIX1_KEXEC_LOADED_NOT_EXECUTED", KERNEL_SHA)
 
@@ -261,8 +266,10 @@ def execute():
     verify_stage()
     require(Path("/sys/kernel/kexec_loaded").read_text().strip() == "1",
             "no loaded kexec candidate")
-    require((STATE / "kexec-loaded").read_text().strip() == KERNEL_SHA,
-            "loaded candidate provenance marker missing")
+    boot_id = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    require((STATE / "kexec-loaded").read_text().strip() ==
+            KERNEL_SHA + " " + boot_id,
+            "loaded candidate provenance or boot-ID marker missing")
     print("DMAFIX1_ONE_SHOT_REBOOT_NOW", flush=True)
     os.sync()
     os.execv("/usr/sbin/kexec", ["kexec", "-e"])

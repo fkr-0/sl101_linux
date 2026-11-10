@@ -72,6 +72,10 @@ class Dmafix1BootTests(unittest.TestCase):
         self.assertIn("tegra-vde.before.ko.zst", text)
         self.assertIn("VDE module SHA mismatch", text)
         self.assertIn("module_check()", text)
+        self.assertIn('MANIFEST = STATE / "modules.sha256"', text)
+        self.assertIn("MANIFEST_SHA", text)
+        self.assertIn("boot_id", text)
+        self.assertIn("loaded candidate provenance or boot-ID marker missing", text)
         for expected in ("035344534c31323880ac79a543010300",
                          "7.0.1-postmarketos-grate-dmafix1",
                          "7f0af633", "module_check()", "kexec_loaded",

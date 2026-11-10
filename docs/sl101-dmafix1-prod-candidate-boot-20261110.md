@@ -59,7 +59,13 @@ original stock kernel if the candidate fails.
 The isolated helper `scripts/sl101-dmafix1-prod-candidate-boot.py`
 is guarded by hostname, SD CID, expected stock version, exact base image,
 AC power, whole module manifest, single graphics qualification lock,
-candidate-archive hash and known original extlinux hash. It backs up
+the host-verified RC archive hash recorded in its receipt, and the known
+original extlinux hash. The immutable 20-MiB complete RC archive remains
+on the host; since the tablet already has the hash-matched kernel and
+587-module baseline, only the missing 31-KiB patched VDE module and
+updated whole-tree checksum manifest are transferred over fragile WLAN.
+The device independently verifies the kernel hash, the new VDE hash and
+the checksums of every installed module/metadata file. It backs up
 the original extlinux and VDE module, installs the patched VDE module,
 verifies the entire updated module tree, and only **then** atomically
 updates SD extlinux. `verify`, `load`, `execute` are separate
