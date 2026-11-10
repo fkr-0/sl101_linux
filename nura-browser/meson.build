@@ -3,6 +3,10 @@ project('nura-browser', 'c',
   meson_version: '>=0.63',
   default_options: ['c_std=c11', 'warning_level=3', 'werror=true'])
 
+# GCC strict C11 hides lstat() unless POSIX feature-test macros are enabled.
+# Define this globally before any GLib/system headers, for genuine ARMHF.
+add_project_arguments('-D_POSIX_C_SOURCE=200809L', language: 'c')
+
 # Explicit cross-worker source inventory; never glob or silently skip a lane.
 # Engine/navigation/control are owned and implemented by workers A/B/C.
 browser_sources = files(
