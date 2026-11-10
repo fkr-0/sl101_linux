@@ -1,0 +1,96 @@
+From: SL101 VDE lane <noreply@localhost>
+Subject: [PATCH] media: tegra-vde: use ownerless semaphore for async VDE jobs
+Date: Sun, 8 Nov 2026 21:00:00 +0100
+
+Decode starts in v4l2_m2m job callback and finishes in workqueue, a
+different task. A mutex cannot cross owners. Binary semaphore serializes
+decode and system sleep across asynchronous tasks. Balance failed suspend.
+
+Host source baseline: Linux 0d9f0083f7a5a31d91d501467b499bb8c4b25bdf
+Not compiled or tested on SL101.
+
+--- a/drivers/media/platform/nvidia/tegra-vde/vde.h
++++ b/drivers/media/platform/nvidia/tegra-vde/vde.h
+@@ -13,6 +13,7 @@
+ #include <linux/iova.h>
+ #include <linux/list.h>
+ #include <linux/mutex.h>
++#include <linux/semaphore.h>
+ #include <linux/types.h>
+ #include <linux/workqueue.h>
+ 
+@@ -102,7 +103,7 @@
+ 	void __iomem *vdma;
+ 	void __iomem *frameid;
+ 	struct device *dev;
+-	struct mutex lock;
++	struct semaphore lock;
+ 	struct mutex map_lock;
+ 	struct list_head map_list;
+ 	struct reset_control *rst;
+--- a/drivers/media/platform/nvidia/tegra-vde/h264.c
++++ b/drivers/media/platform/nvidia/tegra-vde/h264.c
+@@ -539,7 +539,7 @@
+ 	unsigned int macroblocks_nb;
+ 	int err;
+ 
+-	err = mutex_lock_interruptible(&vde->lock);
++	err = down_interruptible(&vde->lock);
+ 	if (err)
+ 		return err;
+ 
+@@ -588,7 +588,7 @@
+ 	pm_runtime_put_autosuspend(dev);
+ 
+ unlock:
+-	mutex_unlock(&vde->lock);
++	up(&vde->lock);
+ 
+ 	return err;
+ }
+@@ -613,7 +613,7 @@
+ 
+ 	pm_runtime_put_autosuspend(dev);
+ 
+-	mutex_unlock(&vde->lock);
++	up(&vde->lock);
+ }
+ 
+ static int tegra_vde_decode_end(struct tegra_vde *vde)
+--- a/drivers/media/platform/nvidia/tegra-vde/vde.c
++++ b/drivers/media/platform/nvidia/tegra-vde/vde.c
+@@ -326,7 +326,7 @@
+ 
+ 	INIT_LIST_HEAD(&vde->map_list);
+ 	mutex_init(&vde->map_lock);
+-	mutex_init(&vde->lock);
++	sema_init(&vde->lock, 1);
+ 	init_completion(&vde->decode_completion);
+ 
+ 	err = tegra_vde_iommu_init(vde);
+@@ -424,11 +424,13 @@
+ 	struct tegra_vde *vde = dev_get_drvdata(dev);
+ 	int err;
+ 
+-	mutex_lock(&vde->lock);
++	down(&vde->lock);
+ 
+ 	err = pm_runtime_force_suspend(dev);
+-	if (err < 0)
+-		return err;
++	if (err < 0) {
++		up(&vde->lock);
++		return err;
++	}
+ 
+ 	return 0;
+ }
+@@ -442,7 +444,7 @@
+ 	if (err < 0)
+ 		return err;
+ 
+-	mutex_unlock(&vde->lock);
++	up(&vde->lock);
+ 
+ 	return 0;
+ }

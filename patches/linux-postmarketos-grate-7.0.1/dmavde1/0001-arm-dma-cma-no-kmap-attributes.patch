@@ -1,0 +1,47 @@
+--- a/arch/arm/mm/dma-mapping.c
++++ b/arch/arm/mm/dma-mapping.c
+@@ -404,18 +404,23 @@
+ 
+ 	__dma_clear_buffer(page, size, coherent_flag);
+ 
+-	if (!want_vaddr)
+-		goto out;
+-
+ 	if (PageHighMem(page)) {
++		if (!want_vaddr)
++			goto out;
+ 		ptr = dma_common_contiguous_remap(page, size, prot, caller);
+ 		if (!ptr) {
+ 			dma_release_from_contiguous(dev, page, count);
+ 			return NULL;
+ 		}
+ 	} else {
++		/*
++		 * Even without a returned kernel VA, lowmem keeps its direct-map
++		 * alias. Match its attributes to the DMA/user mapping to avoid
++		 * conflicting cacheable and write-combine aliases.
++		 */
+ 		__dma_remap(page, size, prot);
+-		ptr = page_address(page);
++		if (want_vaddr)
++			ptr = page_address(page);
+ 	}
+ 
+  out:
+@@ -426,11 +431,12 @@
+ static void __free_from_contiguous(struct device *dev, struct page *page,
+ 				   void *cpu_addr, size_t size, bool want_vaddr)
+ {
+-	if (want_vaddr) {
+-		if (PageHighMem(page))
++	if (PageHighMem(page)) {
++		if (want_vaddr)
+ 			dma_common_free_remap(cpu_addr, size);
+-		else
+-			__dma_remap(page, size, PAGE_KERNEL);
++	} else {
++		/* Restore the normal direct mapping before returning CMA pages. */
++		__dma_remap(page, size, PAGE_KERNEL);
+ 	}
+ 	dma_release_from_contiguous(dev, page, size >> PAGE_SHIFT);
+ }

@@ -1,0 +1,116 @@
+From: SL101 VDE cached buffers (hardware-corrected v2)
+Subject: [PATCH 2/2 v2] media: tegra-vde: opt-in cached non-coherent CAPTURE buffers
+
+Replaces 0002 from the host-only lane. Hardware-qualified on the SL101 on 2026-11-08 as an
+out-of-tree module (7.0.1-postmarketos-grate): CPU reads of CAPTURE buffers 4.8 -> 184 MB/s
+(byte loads), VDE + videoconvert 3.5 -> 25.9 fps, decoded frame bit-exact against software.
+v1 failed: dma_alloc_noncontiguous() accepts no DMA_ATTR_NO_KERNEL_MAPPING (WARN, alloc failure).
+
+--- a/drivers/media/platform/nvidia/tegra-vde/v4l2.c
++++ b/drivers/media/platform/nvidia/tegra-vde/v4l2.c
+@@ -80,6 +80,11 @@
+ 	tegra_set_control_data(ctx, NULL, id);
+ }
+ 
++static bool cached_capture;
++module_param(cached_capture, bool, 0444);
++MODULE_PARM_DESC(cached_capture,
++		 "Force cached non-coherent CAPTURE buffers for userspace that does not request V4L2_MEMORY_FLAG_NON_COHERENT");
++
+ static int tegra_queue_setup(struct vb2_queue *vq,
+ 			     unsigned int *nbufs,
+ 			     unsigned int *num_planes,
+@@ -90,10 +95,21 @@
+ 	struct v4l2_format *f;
+ 	unsigned int i;
+ 
+-	if (V4L2_TYPE_IS_OUTPUT(vq->type))
++	if (V4L2_TYPE_IS_OUTPUT(vq->type)) {
+ 		f = &ctx->coded_fmt;
+-	else
++	} else {
+ 		f = &ctx->decoded_fmt;
++		/*
++		 * Cached non-coherent CAPTURE buffers (userspace opted in
++		 * with V4L2_MEMORY_FLAG_NON_COHERENT): vb2-dma-contig uses
++		 * dma_alloc_noncontiguous(), which only accepts
++		 * DMA_ATTR_ALLOC_SINGLE_PAGES, and needs the kernel mapping
++		 * for its sync helpers.  Otherwise keep the coherent
++		 * write-combined mapping without a kernel mapping.
++		 */
++		vq->dma_attrs = vq->non_coherent_mem ? 0 :
++			DMA_ATTR_WRITE_COMBINE | DMA_ATTR_NO_KERNEL_MAPPING;
++	}
+ 
+ 	if (*num_planes) {
+ 		if (*num_planes != f->fmt.pix_mp.num_planes)
+@@ -386,7 +402,20 @@
+ 	dst_vq->type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+ 	dst_vq->io_modes = VB2_DMABUF | VB2_MMAP;
+ 	dst_vq->lock = &vde->v4l2_lock;
++	/*
++	 * VDE reads decoded frames back as references (bidirectional DMA).
++	 * vb2-dma-contig performs the noncoherent MMAP QBUF/DQBUF sync.
++	 * Keep OUTPUT and private auxiliary allocations unchanged.
++	 */
++	dst_vq->dma_dir = DMA_BIDIRECTIONAL;
++	/*
++	 * Default (coherent) mapping keeps write-combine; the per-request
++	 * attributes for the cached opt-in are chosen in tegra_queue_setup()
++	 * because dma_alloc_noncontiguous() accepts no other attribute.
++	 */
+ 	dst_vq->dma_attrs = dma_attrs;
++	/* dma-sg/IOMMU allocation must be qualified separately. */
++	dst_vq->allow_cache_hints = !vde->domain;
+ 	dst_vq->mem_ops = mem_ops;
+ 	dst_vq->ops = &tegra_qops;
+ 	dst_vq->drv_priv = ctx;
+@@ -734,6 +763,33 @@
+ 	return 0;
+ }
+ 
++/*
++ * With the cached_capture module parameter, behave as if userspace had asked
++ * for V4L2_MEMORY_FLAG_NON_COHERENT on the CAPTURE queue.  videobuf2 insists
++ * that REQBUFS and every later CREATE_BUFS agree on the coherency flag, so
++ * the flag has to be added at the ioctl boundary and not inside queue_setup.
++ */
++static int tegra_reqbufs(struct file *file, void *priv,
++			 struct v4l2_requestbuffers *rb)
++{
++	if (cached_capture && rb->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE &&
++	    rb->memory == V4L2_MEMORY_MMAP)
++		rb->flags |= V4L2_MEMORY_FLAG_NON_COHERENT;
++
++	return v4l2_m2m_ioctl_reqbufs(file, priv, rb);
++}
++
++static int tegra_create_bufs(struct file *file, void *priv,
++			     struct v4l2_create_buffers *create)
++{
++	if (cached_capture &&
++	    create->format.type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE &&
++	    create->memory == V4L2_MEMORY_MMAP)
++		create->flags |= V4L2_MEMORY_FLAG_NON_COHERENT;
++
++	return v4l2_m2m_ioctl_create_bufs(file, priv, create);
++}
++
+ static const struct v4l2_ioctl_ops tegra_v4l2_ioctl_ops = {
+ 	.vidioc_querycap = tegra_querycap,
+ 	.vidioc_enum_framesizes = tegra_enum_framesizes,
+@@ -748,12 +804,12 @@
+ 	.vidioc_s_fmt_vid_cap_mplane = tegra_s_decoded_fmt,
+ 	.vidioc_enum_fmt_vid_cap = tegra_enum_decoded_fmt,
+ 
+-	.vidioc_reqbufs = v4l2_m2m_ioctl_reqbufs,
++	.vidioc_reqbufs = tegra_reqbufs,
+ 	.vidioc_querybuf = v4l2_m2m_ioctl_querybuf,
+ 	.vidioc_qbuf = v4l2_m2m_ioctl_qbuf,
+ 	.vidioc_dqbuf = v4l2_m2m_ioctl_dqbuf,
+ 	.vidioc_prepare_buf = v4l2_m2m_ioctl_prepare_buf,
+-	.vidioc_create_bufs = v4l2_m2m_ioctl_create_bufs,
++	.vidioc_create_bufs = tegra_create_bufs,
+ 	.vidioc_expbuf = v4l2_m2m_ioctl_expbuf,
+ 
+ 	.vidioc_streamon = v4l2_m2m_ioctl_streamon,

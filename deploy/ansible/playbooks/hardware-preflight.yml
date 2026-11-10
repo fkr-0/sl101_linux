@@ -1,0 +1,49 @@
+---
+# Read-only post-reboot qualification. No compositor/GPU ownership acquisition.
+# This is observational, NOT a passing video/GPU pixel qualification.
+- name: SL101 hardware identity and boot observation
+  hosts: all
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Read physical identity (cannot affect boot/session state)
+      ansible.builtin.raw: >-
+        printf 'HOST=%s\nCID=%s\nRELEASE=%s\nBOOT_ID=%s\n'
+        "$(hostname)"
+        "$(cat /sys/block/mmcblk1/device/cid)"
+        "$(uname -r)"
+        "$(cat /proc/sys/kernel/random/boot_id)"
+      register: identity
+      check_mode: false
+      changed_when: false
+
+    - name: Fail closed on wrong hostname or SD identity
+      ansible.builtin.assert:
+        that:
+          - ('HOST=' ~ expected_hostname) in identity.stdout_lines
+          - ('CID=' ~ expected_sd_cid) in identity.stdout_lines
+        fail_msg: "Wrong physical SL101: no further checks or deployment."
+
+    - name: Record read-only kernel, graphics and VDE status
+      ansible.builtin.raw: |
+        printf 'kernel='; uname -r
+        printf 'cmdline='; cat /proc/cmdline
+        printf 'drm_card='; test -e /dev/dri/card0 && echo yes || echo no
+        printf 'vde_device='; test -e /dev/video0 && echo yes || echo no
+        printf 'vde_parameter='
+        if [ -r /sys/module/tegra_vde/parameters/cached_capture ]; then
+          cat /sys/module/tegra_vde/parameters/cached_capture
+        else
+          echo unavailable
+        fi
+        printf 'desktop_processes='
+        { pgrep -a -f 'sway|sl101-sway|labwc' || true; } | head -8
+        printf 'module_tree='
+        test -d "/lib/modules/$(uname -r)" && echo present || echo missing
+      register: status
+      check_mode: false
+      changed_when: false
+
+    - name: Display observed state without making a release claim
+      ansible.builtin.debug:
+        var: status.stdout_lines

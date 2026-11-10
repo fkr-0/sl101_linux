@@ -1,11 +1,16 @@
 ---
-# Purely host-side: no device operations, no kernel promotion.
-- name: Verify kernel candidate patch completeness and module coherence
+# Entirely controller-local. No device SSH, kernel staging or boot mutation.
+- name: Gate combined SL101 production-source DMA and VDE candidate
   hosts: localhost
   connection: local
   gather_facts: false
+  vars:
+    kernel_candidate_root: "{{ (playbook_dir ~ '/../../../work/sl101-prod-dmavde-rc3-20261110') | realpath }}"
+    kernel_candidate_release: 7.0.1-postmarketos-grate-dmavde1
+    kernel_expected_dtb_sha: 01fbb5a935e429c42dc5e2793049bbfc91ff3a6f73c15f2063e1fb0af1a289b0
+    kernel_archive_filename: sl101-7.0.1-dmavde1-four-patch-candidate.tar.zst
   tasks:
-    - name: Require VDE v2 and a complete kernel release
+    - name: Verify actual kernel image, DTB, 587-module ABI and two VDE binary fixes
       ansible.builtin.command:
         argv:
           - python3
@@ -17,3 +22,18 @@
           - --expected-dtb-sha
           - "{{ kernel_expected_dtb_sha }}"
       changed_when: false
+      check_mode: false
+
+    - name: Verify immutable four-patch candidate release checksums
+      ansible.builtin.command:
+        argv: [sha256sum, -c, SHA256SUMS]
+        chdir: "{{ kernel_candidate_root }}/release"
+      changed_when: false
+      check_mode: false
+
+    - name: Verify portable archive digest
+      ansible.builtin.command:
+        argv: [sha256sum, -c, "{{ kernel_archive_filename }}.sha256"]
+        chdir: "{{ kernel_candidate_root }}"
+      changed_when: false
+      check_mode: false

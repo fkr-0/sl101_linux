@@ -77,9 +77,23 @@ This host-only guard verifies the built module, not just source patches:
     python3 deploy/ansible/tools/verify_kernel.py --root work/sl101-prod-dma-init-20261110 --release 7.0.1-postmarketos-grate-dmafix1 --expected-dtb-sha 01fbb5a935e429c42dc5e2793049bbfc91ff3a6f73c15f2063e1fb0af1a289b0
 
 It deliberately fails because the VDE cached_capture parameter is
-absent from tegra-vde.ko.zst. A release must pass this gate AND on-device
-boot/input/video/pixel qualification before it may become the default.
-No kernel staging/reboot/flash is included in the current playbook.
+absent from tegra-vde.ko.zst. A **new** separate combined release,
+`7.0.1-postmarketos-grate-dmavde1`, has four host-applied source
+patches (CMA alias, DMA-direct zero, cached CAPTURE v2 and async
+semaphore), 587/587 matching modules and a complete archive.
+
+Read-only combined-RC preflight (also usable in check mode):
+
+    ansible-playbook -i deploy/ansible/inventory/hosts.yml deploy/ansible/playbooks/kernel-preflight.yml --check
+
+The device-side read-only preflight is separate:
+
+    ansible-playbook -i deploy/ansible/inventory/hosts.yml deploy/ansible/playbooks/hardware-preflight.yml --limit sl101-nura
+
+The new kernel is **host-verified but NOT device-qualified**; the CMA
+alias patch is still experimental. Previous RC2 was already staged and
+its one-shot .106 boot outcome is unresolved; preserve its rollback.
+No kernel staging/reboot/flash is included in the current playbooks.
 
 ## Remaining porting
 
