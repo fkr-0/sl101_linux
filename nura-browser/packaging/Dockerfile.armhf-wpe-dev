@@ -1,0 +1,29 @@
+# syntax=docker/dockerfile:1
+# Host-only reproducible ARMHF development image. Never deployed to SL101.
+# Build context must contain only two verified, pinned armhf .deb files.
+FROM sl101-wpe-armhf-builder:20261003
+
+# Stock builder is Debian trixie (glibc 2.41); WPE 2.54.0-2 requires
+# armhf glibc >=2.43 and libicu78 from unstable. Keep changes in Docker.
+RUN sed -i 's@http://deb.debian.org@https://deb.debian.org@g' /etc/apt/sources.list.d/debian.sources \
+    && printf 'deb https://ftp.fau.de/debian unstable main\n' \
+       > /etc/apt/sources.list.d/nura-unstable.list
+
+COPY packages/libwpewebkit-2.0-1_2.54.0-2_armhf.deb /tmp/nura-wpe-runtime.deb
+COPY packages/libwpewebkit-2.0-dev_2.54.0-2_armhf.deb /tmp/nura-wpe-dev.deb
+
+# apt resolves the genuine target headers/runtime closure. It must not
+# substitute a newer WPE runtime/dev version for these exact local packages.
+RUN --mount=type=cache,id=sl101-nura-apt-archives,target=/var/cache/apt/archives,sharing=locked \
+    --mount=type=cache,id=sl101-nura-apt-lists,target=/var/lib/apt/lists,sharing=locked \
+    apt-get -o Acquire::Retries=1 update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+       libglib2.0-dev:armhf libjson-glib-dev:armhf \
+       /tmp/nura-wpe-runtime.deb /tmp/nura-wpe-dev.deb
+
+# Verify exact pinned package versions in a separate cacheable layer.
+RUN test "$(dpkg-query -W -f='${Version}' libwpewebkit-2.0-1:armhf)" = '2.54.0-2' \
+    && test "$(dpkg-query -W -f='${Version}' libwpewebkit-2.0-dev:armhf)" = '2.54.0-2' \
+    && rm -f /tmp/nura-wpe-runtime.deb /tmp/nura-wpe-dev.deb
+
+# Only a build environment; no direct device I/O and no ENTRYPOINT.
