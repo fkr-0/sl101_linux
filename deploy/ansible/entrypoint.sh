@@ -14,9 +14,22 @@ case "$1" in
   check) set -- --check --diff ;;
   apply)
     [ "${SL101_APPLY:-NO}" = YES ] || { echo 'apply requires SL101_APPLY=YES' >&2; exit 65; }
+    [ "${SL101_CUTOVER:-NO}" = YES ] || {
+        echo 'apply has no non-cutover roles yet; requires SL101_CUTOVER=YES' >&2
+        exit 65
+    }
     set -- --diff ;;
   *) echo 'usage: check|apply' >&2; exit 64 ;;
 esac
-python3 /workspace/deploy/ansible/tools/render_public.py     --workspace /workspace --profile "$DEPLOY_PROFILE" --output /tmp/sl101-rendered
+python3 /workspace/deploy/ansible/tools/render_public.py \
+    --workspace /workspace --profile "$DEPLOY_PROFILE" \
+    --output /tmp/sl101-rendered
+if [ "${SL101_CUTOVER:-NO}" = YES ]; then
+    # Hard cutover is refused *before* any remote mutation when even one
+    # active local service/keybinding still invokes a retired executable.
+    python3 /workspace/deploy/ansible/tools/validate_render.py \
+        --workspace /workspace --profile "$DEPLOY_PROFILE" \
+        --output /tmp/sl101-rendered
+fi
 cd /workspace
 exec ansible-playbook -i /inventory/hosts.yml deploy/ansible/playbooks/site.yml --limit "$DEPLOY_TARGET" "$@"

@@ -27,14 +27,38 @@
   register: public_existing
   changed_when: false
 
-- name: Refuse symlinks/directories at canonical executable destinations
+- name: Refuse symlinks/directories/large files at canonical destinations
   ansible.builtin.assert:
     that:
       - not item.stat.exists or (item.stat.isreg and not item.stat.islnk)
-    fail_msg: "Unsafe collision with non-regular file: {{ item.item | basename }}"
+      - not item.stat.exists or (item.stat.size | default(0) | int) < 1048576
+    fail_msg: "Unsafe collision with foreign or oversized file: {{ item.item | basename }}"
   loop: "{{ public_existing.results }}"
   loop_control:
     label: "{{ item.item | basename }}"
+
+- name: Read pre-existing canonical files before allowing overwrite
+  ansible.builtin.slurp:
+    src: "{{ item.stat.path }}"
+  loop: "{{ public_existing.results }}"
+  when: item.stat.exists
+  register: public_existing_content
+  changed_when: false
+  check_mode: false
+
+- name: Refuse to overwrite unrelated comma-named commands
+  ansible.builtin.assert:
+    that:
+      - >-
+        (item.content | b64decode).splitlines()[1]
+        is match('^# (Managed by SL101 Ansible public-command cutover|SL101 public command:)')
+    fail_msg: >-
+      Existing {{ item.item.item | basename }} was not created by this
+      deployment. Refusing overwrite; recover manually before cutover.
+  loop: "{{ public_existing_content.results }}"
+  when: item.content is defined
+  loop_control:
+    label: "{{ item.item.item | basename }}"
 
 - name: Inspect all corresponding legacy executable destinations
   ansible.builtin.stat:

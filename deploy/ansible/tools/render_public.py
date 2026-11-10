@@ -43,13 +43,12 @@ def render(profile: str, workspace: Path, output: Path) -> dict:
     if not sources:
         raise ValueError(f"No public executable templates: {binaries}")
 
-    # Replace only executable references, never arbitrary sl101-* labels.
-    # In particular keep sl101-desktop.pid, sl101-sway-panel.lock,
-    # rc-service sl101-desktop, and process comm "sl101-sway" intact.
+    # Only replace executable call-sites, not service names, pidfiles,
+    # process comm values, log files, or other device-specific identifiers.
     names = "|".join(re.escape(p.name) for p in sorted(sources, key=lambda p: -len(p.name)))
     pat = re.compile(
-        r"(?P<prefix>/usr/local/bin/|\\bexec[ \\t]+|\\bcommand[ \\t]+-v[ \\t]+|\\bsudo[ \\t]+-n[ \\t]+)"
-        r"(?P<name>" + names + r")(?![A-Za-z0-9_-]|\\.[A-Za-z0-9_-])"
+        r"(?P<prefix>/usr/local/bin/|\bexec[ \t]+|\bcommand[ \t]+-v[ \t]+|\bsudo[ \t]+(?:-n[ \t]+)?)"
+        r"(?P<name>" + names + r")(?![A-Za-z0-9_-]|\.[A-Za-z0-9_-])"
     )
     # Remove obsolete generated metadata from pre-manifest-free prototypes.
     obsolete = output / "render-result.json"
@@ -69,7 +68,13 @@ def render(profile: str, workspace: Path, output: Path) -> dict:
         original = source.read_text()
         if not original.startswith("#!"):
             raise ValueError(f"Non-script executable requires binary distribution: {source}")
-        target.write_text(rewrite(original))
+        transformed = rewrite(original)
+        # Marker allows the remote playbook to distinguish an executable
+        # previously managed by this role from an unrelated comma-command.
+        shebang, separator, rest = transformed.partition("\n")
+        if not separator:
+            raise ValueError(f"Executable script has no complete shebang: {source}")
+        target.write_text(shebang + "\n# Managed by SL101 Ansible public-command cutover\n" + rest)
         target.chmod(0o755)
         if target.read_text().startswith("#!/bin/sh") or target.read_text().startswith("#!/bin/bash"):
             check = subprocess.run(["sh" if target.read_text().startswith("#!/bin/sh") else "bash",

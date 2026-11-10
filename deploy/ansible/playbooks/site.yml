@@ -23,6 +23,28 @@
           - ('HOST=' ~ expected_hostname) in identity.stdout_lines
           - ('CID=' ~ expected_sd_cid) in identity.stdout_lines
         fail_msg: Wrong host/CID or incomplete inventory; no deployment permitted.
+    - name: Refuse direct, unauthorized hard-cutover mutations
+      ansible.builtin.assert:
+        that:
+          - ansible_check_mode or lookup('ansible.builtin.env', 'SL101_APPLY', default='NO') == 'YES'
+        fail_msg: Hard cutover requires SL101_APPLY=YES or read-only --check.
+      when: sl101_cutover | bool
+    - name: Recheck complete rendered command cutover on controller
+      ansible.builtin.command:
+        argv:
+          - python3
+          - /workspace/deploy/ansible/tools/validate_render.py
+          - --workspace
+          - /workspace
+          - --profile
+          - "{{ device_variant }}"
+          - --output
+          - "{{ sl101_render_root | default('/tmp/sl101-rendered') }}"
+      delegate_to: localhost
+      become: false
+      check_mode: false
+      changed_when: false
+      when: sl101_cutover | bool
     - name: Probe running desktop before changing command names
       ansible.builtin.raw: >-
         pgrep -x sway >/dev/null ||
