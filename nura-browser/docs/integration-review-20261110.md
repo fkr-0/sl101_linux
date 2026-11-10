@@ -55,6 +55,20 @@ Run from the sl101_linux repository root:
     python3 -m unittest discover -s nura-browser/tests -p 'test_*.py' -q
     make test && make check
 
+Observed results from actual host commands (2026-11-10):
+
+| Verification | Outcome |
+| --- | --- |
+| Engine host smoke | 6/6 pass |
+| Navigation host smoke | 6/6 pass |
+| Control IPC host smoke | 13/13 pass |
+| Linked navigation + control AF_UNIX | 3/3 pass |
+| Offline build/integration Python suite | 26/26 pass |
+| Root make test | 2092 OK, 3 skipped |
+| Root make check | Exit 0 |
+| Meson format parse | Exit 0 |
+| Meson host setup | Exit 1, expected: missing wpe-webkit-2.0 |
+
 Meson source/gate check:
 
     meson setup /tmp/nurabrowser-integrate-host-20261110 nura-browser --prefix=/usr -Dlibexecdir=libexec
