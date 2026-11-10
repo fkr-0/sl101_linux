@@ -12,6 +12,9 @@ pivot_root . .sl101-host-root
 cd /
 umount -l /.sl101-host-root
 if [ "$mode" = gpu ]; then
+    # WebKit's damage-based compositing (buffer age) treats the second window buffer as already valid on this
+    # EGL/Grate chain, so only partial repaints reach it and the rest shows uninitialised memory (video noise).
+    # Disabling it repaints every frame completely. See docs/sl101-yuv-multipass-driver-20261109.md.
     lib=/opt/grate-glibc-45ef1175/usr/lib/arm-linux-gnueabihf
     test -f /opt/grate-glibc-45ef1175/.sl101-overlay-sha256
     test -d "$lib"
@@ -21,8 +24,11 @@ if [ "$mode" = gpu ]; then
       WEBKIT_USE_SKIA_FOR_COMPOSITION="${SL101_WPE_SKIA_COMPOSITION:-0}" \
       LD_LIBRARY_PATH="/opt/sl101-webp-nosimd/lib:$lib:$lib/dri:$lib/gbm" LIBGL_DRIVERS_PATH="$lib/dri" \
       GBM_BACKENDS_PATH="$lib/gbm" MESA_LOADER_DRIVER_OVERRIDE=grate \
-      /usr/bin/dbus-run-session -- /usr/bin/cog --platform=wl "$@"
+      /usr/bin/dbus-run-session -- /usr/bin/cog --platform=wl \
+      --features=-UseDamagingInformationForCompositing "$@"
 fi
+# Software mode needs WebKit's CPU Skia renderer as well (like the GPU branch above): without it WebKit tries GPU
+# rendering on top of softpipe and the window stays unpainted (the Sway background colour shows through).
 # Debian armhf libwebp 1.6.0-0.1 executes NEON/VFP d16+ code on Tegra20
 # despite the CPU exposing only VFPv3-D16 and no NEON. The software-first
 # browser uses the existing no-SIMD build from this private prefix. Both modes
@@ -30,6 +36,7 @@ fi
 exec /usr/bin/setpriv --reuid=1000 --regid=1000 --groups "$render_gid" \
   /usr/bin/env -i HOME=/home/browser USER=browser LOGNAME=browser PATH=/usr/bin:/bin \
   LANG=C.UTF-8 XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 \
+  WEBKIT_SKIA_ENABLE_CPU_RENDERING=1 \
   WEBKIT_USE_SKIA_FOR_COMPOSITION="${SL101_WPE_SKIA_COMPOSITION:-0}" \
   LD_LIBRARY_PATH=/opt/sl101-webp-nosimd/lib \
   LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=softpipe MESA_LOADER_DRIVER_OVERRIDE=swrast \
