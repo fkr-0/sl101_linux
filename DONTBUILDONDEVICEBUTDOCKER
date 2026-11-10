@@ -1,0 +1,26 @@
+================================================================================
+              DO NOT BUILD MESA ON THE SL101 DEVICE
+================================================================================
+
+Mesa cross-compilation is MAGNITUDES faster via Docker / bwrap than building
+natively on the Tegra2 ARM device.
+
+The production build uses:
+  - Alpine musl cross-compiler (armv7-alpine-linux-musleabihf-gcc)
+  - bwrap sandbox with device sysroot at /mnt/sysroot
+  - Mixed build: only recompile changed grate driver objects + relink
+  - Base Mesa build from Sep 30 snapshot
+
+Cross-build locations:
+  work/sl101-grate-production-20261004/  — production build recipe & artifacts
+  work/sl101-grate-production-20261004/production.cross — meson cross file
+  work/sl101-grate-production-20261004/recipes/ — build scripts
+  build/mesa-grate-clean/ — Docker-based full cross-build
+
+The on-device meson build also produces DIFFERENT binaries because it resolves
+pkg-config paths differently (e.g. links against /usr/local/lib/libdrm_tegra
+instead of the sysroot's version), so even with identical source the output
+binary may not work correctly.
+
+ALWAYS use the cross-compilation path.
+================================================================================
