@@ -45,6 +45,15 @@ class RuntimeClosureTests(TestCase):
         self.assertIn("vfma.f64", AUDIT.flagged_disassembly_line(
             "   3a470: eea02b01     vfma.f64 d2, d0, d1"
         ))
+        self.assertIn("vadd.f32", AUDIT.flagged_disassembly_line(
+            "   3a474: f2000d12     vadd.f32 d0, d2, d4"
+        ))
+        self.assertIsNone(AUDIT.flagged_disassembly_line(
+            "   3a478: ee300a81     vadd.f32 s0, s1, s2"
+        ))
+        self.assertIn("vabal.u8", AUDIT.flagged_disassembly_line(
+            "   3a47c: f2800d12     vabal.u8 d0, d2, d4"
+        ))
 
     def test_safe_library_resolution(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -107,6 +116,93 @@ class RuntimeClosureTests(TestCase):
             self.assertTrue(any("NEON attribute" in problem["reason"]
                                 for problem in result["forbidden"]))
 
+    def test_missing_dynamic_interpreter_blocks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            app = root / "bin/nura"
+            app.parent.mkdir(parents=True)
+            app.write_bytes(b"\x7fELF" + b"\x00" * 10)
+            def readelf(*argv):
+                if "-hW" in argv:
+                    return "Machine: ARM\nFlags: hard-float ABI\n"
+                if "-A" in argv:
+                    return "Tag_CPU_arch: v7\nTag_FP_arch: VFPv3-D16\n"
+                if "-lW" in argv:
+                    return "[Requesting program interpreter: /lib/ld-linux-armhf.so.3]"
+                return ""
+            with patch.object(AUDIT, "run", side_effect=readelf):
+                result = AUDIT.scan(root, app, full=False, objdump="unused")
+            self.assertFalse(result["pass"])
+            self.assertEqual(result["missing"][0]["interpreter"], "/lib/ld-linux-armhf.so.3")
+
+    def test_interpreter_included_in_closure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            app = root / "bin/nura"
+            app.parent.mkdir(parents=True)
+            app.write_bytes(b"\x7fELF" + b"\x00" * 10)
+            loader = root / "lib/ld-linux-armhf.so.3"
+            loader.parent.mkdir(parents=True)
+            loader.write_bytes(b"\x7fELF" + b"\x00" * 10)
+            def readelf(*argv):
+                if "-hW" in argv:
+                    return "Machine: ARM\nFlags: hard-float ABI\n"
+                if "-A" in argv:
+                    return "Tag_CPU_arch: v7\nTag_FP_arch: VFPv3-D16\n"
+                if "-lW" in argv and argv[-1].endswith("/nura"):
+                    return "[Requesting program interpreter: /lib/ld-linux-armhf.so.3]"
+                return ""
+            with patch.object(AUDIT, "run", side_effect=readelf):
+                result = AUDIT.scan(root, app, full=False, objdump="unused")
+            self.assertEqual(result["missing"], [])
+            self.assertEqual(result["files_scanned"], 2)
+            self.assertEqual(result["files"][0]["interpreter"], "/lib/ld-linux-armhf.so.3")
+            self.assertFalse(result["pass"])
+
+    def test_closure_cap_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            app = root / "bin/nura"
+            app.parent.mkdir(parents=True)
+            app.write_bytes(b"\x7fELF\x00")
+            loader = root / "lib/ld-linux-armhf.so.3"
+            loader.parent.mkdir(parents=True)
+            loader.write_bytes(b"\x7fELF\x00")
+            def readelf(*argv):
+                if "-hW" in argv:
+                    return "Machine: ARM\nFlags: hard-float ABI\n"
+                if "-A" in argv:
+                    return "Tag_FP_arch: VFPv3-D16"
+                if "-lW" in argv and argv[-1].endswith("/nura"):
+                    return "[Requesting program interpreter: /lib/ld-linux-armhf.so.3]"
+                return ""
+            with patch.object(AUDIT, "run", side_effect=readelf):
+                with self.assertRaisesRegex(ValueError, "closure cap"):
+                    AUDIT.scan(root, app, full=False, objdump="unused",
+                               max_files=1)
+
+    def test_symlinked_loader_cannot_escape_sysroot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            app = root / "bin/nura"
+            app.parent.mkdir(parents=True)
+            app.write_bytes(b"\x7fELF\x00")
+            loader = root / "lib/ld-linux-armhf.so.3"
+            loader.parent.mkdir(parents=True)
+            loader.symlink_to("/etc/passwd")
+            def readelf(*argv):
+                if "-hW" in argv:
+                    return "Machine: ARM\nFlags: hard-float ABI\n"
+                if "-A" in argv:
+                    return "Tag_FP_arch: VFPv3-D16\n"
+                if "-lW" in argv:
+                    return "[Requesting program interpreter: /lib/ld-linux-armhf.so.3]"
+                return ""
+            with patch.object(AUDIT, "run", side_effect=readelf):
+                result = AUDIT.scan(root, app, full=False, objdump="unused")
+            self.assertFalse(result["pass"])
+            self.assertEqual(result["missing"][0]["interpreter"], "/lib/ld-linux-armhf.so.3")
+
     def test_attributes_only_must_never_claim_pass(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
@@ -115,6 +211,7 @@ class RuntimeClosureTests(TestCase):
             with patch.object(AUDIT, "run", side_effect=[
                 "Machine: ARM\nhard-float ABI",
                 "Tag_FP_arch: VFPv3-D16",
+                "",
                 "",
             ]):
                 result = AUDIT.scan(root, app, full=False, objdump="unused")
