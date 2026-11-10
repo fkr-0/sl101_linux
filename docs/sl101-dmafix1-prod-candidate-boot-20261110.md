@@ -46,15 +46,23 @@ Rebuild/verification (host, no device mutations):
 
 ## Boot model and recovery
 
-The tablet's cold boot **does not** interpret
-`/boot/extlinux/extlinux.conf`; that SD file applies only when a user
-enters APX and loads the verified RAM-only U-Boot. Therefore the next
-reboot is an explicit one-shot **`kexec -l` + `kexec -e`** from the
-running stock kernel, with the same root and DTB. The SD extlinux
-`default` is changed to the complete RC as the default for a later
-operator APX boot. The internal eMMC boot image and all permanent
-bootloader bytes stay untouched. A physical cold boot returns to the
-original stock kernel if the candidate fails.
+**Boot-chain correction (2026-11-10):** The earlier claim that this
+tablet's cold boot *never* interprets SD `/boot/extlinux/extlinux.conf`
+and always falls back to an ASUS vendor kernel was not proven and must
+not be reused. Device `.106` uses the **native U-Boot boot path**, with
+operator-reported U-Boot installation in eMMC and a verified SD rootfs.
+Which kernel-bearing location and extlinux search path this installed
+U-Boot actually selected at cold boot remains to be confirmed.
+See the current canonical device map:
+`docs/sl101-two-device-boot-and-kernel-contract-20261110.md`.
+
+For this historical RC2 rollout the running stock kernel instead received
+a deliberate, one-shot `kexec -l` + `kexec -e` handoff. The SD
+`/boot/extlinux/extlinux.conf` was modified as staged evidence, **not
+proven to be the persistent native-U-Boot default**. No internal eMMC
+bootloader bytes were modified by that rollout; consequently a physical
+cold boot path may differ from the attempted kexec path. Preserve the
+operator's current known-working boot route until verified independently.
 
 The isolated helper `scripts/sl101-dmafix1-prod-candidate-boot.py`
 is guarded by hostname, SD CID, expected stock version, exact base image,
@@ -106,9 +114,16 @@ basics; acceptance of VDE/KMS video remains its own gate.
 - Explicitly authorized `execute` reverified the full module tree and
   emitted `DMAFIX1_ONE_SHOT_REBOOT_NOW` immediately before `kexec -e`.
 
-**Postboot not yet confirmed:** SSH timed out and ARP/ping did not answer
-immediately after handoff. This proves the handoff was issued, NOT that
-the candidate finished booting. No postboot VDE/KMS or Cog test was
-performed. With physical access, a cold power cycle returns via the
-unchanged internal stock boot path if the candidate hangs. Do not blindly
-retry kexec or rewrite eMMC.
+**Historical post-kexec result:** SSH timed out and ARP/ping did not
+answer immediately after handoff. This proves the handoff was issued,
+NOT that the candidate finished booting. No postboot VDE/KMS or Cog
+test was performed.
+
+**Later verified state (2026-11-10):** After an operator-performed
+physical reboot `.106` became reachable with stock release
+`7.0.1-postmarketos-grate`, while the staged SD extlinux default still
+reads `dmafix1-prod-candidate`. This neither qualifies the candidate
+nor demonstrates a kernel panic; it indicates the cold boot did not
+load the staged RC2 zImage. Do not blindly repeat kexec or change the
+eMMC bootloader. Investigate the native U-Boot bootmethod/source first.
+Refer to the canonical two-device boot contract linked above.
