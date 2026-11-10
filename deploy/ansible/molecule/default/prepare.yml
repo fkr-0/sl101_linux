@@ -1,0 +1,21 @@
+---
+# Realistic cutover fixture: each fake device already has a legacy launcher.
+- name: Prepare offline legacy command fixtures
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    sandbox_root: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') | default('/tmp/sl101-molecule-offline', true) }}"
+  tasks:
+    - name: Prepare legacy public binary directories
+      ansible.builtin.file:
+        path: "{{ sandbox_root }}/{{ item }}/root/usr/local/bin"
+        state: directory
+        mode: "0755"
+      loop: [nura, debian]
+    - name: Place old public executable before migration
+      ansible.builtin.copy:
+        dest: "{{ sandbox_root }}/{{ item }}/root/usr/local/bin/sl101-browse"
+        content: "#!/bin/sh\nprintf 'legacy browser'\n"
+        mode: "0755"
+      loop: [nura, debian]

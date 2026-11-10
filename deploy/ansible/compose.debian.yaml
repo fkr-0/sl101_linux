@@ -1,0 +1,5 @@
+services:
+  deploy:
+    environment:
+      DEPLOY_TARGET: sl101-debian
+      DEPLOY_PROFILE: debian

@@ -1,0 +1,125 @@
+---
+# All names come from actual rendered source filenames. No alias manifest.
+- name: Define controller rendering and installation roots
+  ansible.builtin.set_fact:
+    public_render_root: "{{ sl101_render_root | default('/tmp/sl101-rendered') }}"
+    public_target_root: "{{ sl101_install_root | default('') | regex_replace('/$', '') }}"
+  changed_when: false
+
+- name: Discover exact comma executable filenames
+  ansible.builtin.set_fact:
+    public_command_sources: "{{ lookup('ansible.builtin.fileglob', public_render_root ~ '/bin/,*', wantlist=True) | sort }}"
+    public_config_sources: "{{ lookup('ansible.builtin.pipe', 'find ' ~ ((public_render_root ~ '/config') | quote) ~ ' -type f -print') | split('\n') | reject('equalto', '') | list | sort }}"
+  changed_when: false
+
+- name: Require rendered commands/configurations, without aliases
+  ansible.builtin.assert:
+    that:
+      - public_command_sources | length > 0
+      - public_config_sources | length > 0
+      - (public_command_sources | map('basename') | select('match', '^,[a-z][a-z0-9-]*$') | list | length) == (public_command_sources | length)
+    fail_msg: No valid canonical commands/config files were rendered.
+
+- name: Inspect canonical command collisions
+  ansible.builtin.stat:
+    path: "{{ public_target_root }}/usr/local/bin/{{ item | basename }}"
+  loop: "{{ public_command_sources }}"
+  register: public_existing
+  changed_when: false
+
+- name: Refuse symlinks/directories at canonical executable destinations
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or (item.stat.isreg and not item.stat.islnk)
+    fail_msg: "Unsafe collision with non-regular file: {{ item.item | basename }}"
+  loop: "{{ public_existing.results }}"
+  loop_control:
+    label: "{{ item.item | basename }}"
+
+- name: Inspect all corresponding legacy executable destinations
+  ansible.builtin.stat:
+    path: "{{ public_target_root }}/usr/local/bin/sl101-{{ item | basename | regex_replace('^,', '') }}"
+  loop: "{{ public_command_sources }}"
+  register: old_commands
+  changed_when: false
+
+- name: Refuse unsafe legacy filenames before removal
+  ansible.builtin.assert:
+    that: not item.stat.exists or item.stat.isreg
+    fail_msg: "Legacy command is not a regular file; refuse removal."
+  loop: "{{ old_commands.results }}"
+  loop_control:
+    label: "{{ item.item | basename }}"
+
+
+- name: Create canonical public command directory
+  become: "{{ not (sl101_molecule | default(false) | bool) }}"
+  ansible.builtin.file:
+    path: "{{ public_target_root }}/usr/local/bin"
+    state: directory
+    mode: "0755"
+
+- name: Install canonical comma-prefixed executables
+  become: "{{ not (sl101_molecule | default(false) | bool) }}"
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ public_target_root }}/usr/local/bin/{{ item | basename }}"
+    owner: "{{ omit if (sl101_molecule | default(false) | bool) else 'root' }}"
+    group: "{{ omit if (sl101_molecule | default(false) | bool) else 'root' }}"
+    mode: "0755"
+    backup: true
+  loop: "{{ public_command_sources }}"
+  loop_control:
+    label: "{{ item | basename }}"
+
+- name: Create parent paths for rewritten active configurations
+  become: "{{ not (sl101_molecule | default(false) | bool) }}"
+  ansible.builtin.file:
+    path: "{{ public_target_root }}/{{ item | replace(public_render_root ~ '/config/', '') | dirname }}"
+    state: directory
+    mode: "0755"
+  loop: "{{ public_config_sources }}"
+
+- name: Install updated Sway/desktop/session references atomically
+  become: "{{ not (sl101_molecule | default(false) | bool) }}"
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ public_target_root }}/{{ item | replace(public_render_root ~ '/config/', '') }}"
+    owner: "{{ omit if (sl101_molecule | default(false) | bool) else ('user' if item | replace(public_render_root ~ '/config/', '') is match('^home/user/') else 'root') }}"
+    group: "{{ omit if (sl101_molecule | default(false) | bool) else ('user' if item | replace(public_render_root ~ '/config/', '') is match('^home/user/') else 'root') }}"
+    mode: "{{ '0755' if item | replace(public_render_root ~ '/config/', '') is match('^etc/init.d/') else '0644' }}"
+    backup: true
+  loop: "{{ public_config_sources }}"
+  loop_control:
+    label: "{{ item | replace(public_render_root ~ '/config/', '') }}"
+
+- name: Create private rollback directory for retired binaries
+  become: "{{ not (sl101_molecule | default(false) | bool) }}"
+  ansible.builtin.file:
+    path: "{{ public_target_root }}/var/lib/sl101-deploy/legacy-bin"
+    state: directory
+    mode: "0700"
+  when: old_commands.results | selectattr('stat.exists') | list | length > 0
+
+- name: Archive legacy executable bytes once before hard cutover
+  become: "{{ not (sl101_molecule | default(false) | bool) }}"
+  ansible.builtin.copy:
+    src: "{{ item.stat.path }}"
+    dest: "{{ public_target_root }}/var/lib/sl101-deploy/legacy-bin/sl101-{{ item.item | basename | regex_replace('^,', '') }}"
+    remote_src: true
+    force: false
+    mode: "0700"
+  loop: "{{ old_commands.results }}"
+  when: item.stat.exists
+  loop_control:
+    label: "{{ item.item | basename }}"
+
+- name: Remove old public filenames (no compatibility symlinks)
+  become: "{{ not (sl101_molecule | default(false) | bool) }}"
+  ansible.builtin.file:
+    path: "{{ item.stat.path }}"
+    state: absent
+  loop: "{{ old_commands.results }}"
+  when: item.stat.exists
+  loop_control:
+    label: "{{ item.item | basename }}"

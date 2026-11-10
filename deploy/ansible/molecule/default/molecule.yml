@@ -1,0 +1,20 @@
+---
+# Delegated localhost integration: no tablet SSH, no Docker-in-Docker, no root.
+dependency:
+  name: galaxy
+  options:
+    role-file: /dev/null
+    requirements-file: /dev/null
+driver:
+  name: default
+platforms:
+  - name: localhost
+    ansible_connection: local
+scenario:
+  name: default
+  test_sequence:
+    - syntax
+    - prepare
+    - converge
+    - idempotence
+    - verify

@@ -1,0 +1,32 @@
+---
+- name: Converge Nura and Debian command hard cutovers in isolated fake roots
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    source_root: "{{ (playbook_dir ~ '/../../../..') | realpath }}"
+    sandbox_root: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') | default('/tmp/sl101-molecule-offline', true) }}"
+  tasks:
+    - name: Render original per-device sources as comma-only binaries
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ source_root }}/deploy/ansible/tools/render_public.py"
+          - --profile
+          - "{{ item }}"
+          - --workspace
+          - "{{ source_root }}"
+          - --output
+          - "{{ sandbox_root }}/{{ item }}/rendered"
+      loop: [nura, debian]
+      changed_when: false
+
+    - name: Test real user-commands tasks on fake devices
+      ansible.builtin.include_tasks: ../../playbooks/user-commands.yml
+      vars:
+        sl101_render_root: "{{ sandbox_root }}/{{ profile }}/rendered"
+        sl101_install_root: "{{ sandbox_root }}/{{ profile }}/root"
+        sl101_molecule: true
+      loop: [nura, debian]
+      loop_control:
+        loop_var: profile

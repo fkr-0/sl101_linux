@@ -1,0 +1,47 @@
+---
+- name: SL101 fail-closed, identity-protected deployment
+  hosts: all
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    sl101_cutover: "{{ lookup('ansible.builtin.env', 'SL101_CUTOVER', default='NO') == 'YES' }}"
+  tasks:
+    - name: Read exact physical identity before any privileged operation
+      ansible.builtin.raw: >-
+        printf 'HOST=%s\nCID=%s\nKERNEL=%s\n'
+        "$(hostname)"
+        "$(cat /sys/block/mmcblk1/device/cid)"
+        "$(uname -r)"
+      register: identity
+      changed_when: false
+      check_mode: false
+    - name: Refuse incomplete or unexpected target identity
+      ansible.builtin.assert:
+        that:
+          - expected_hostname | length > 0
+          - expected_sd_cid | length == 32
+          - ('HOST=' ~ expected_hostname) in identity.stdout_lines
+          - ('CID=' ~ expected_sd_cid) in identity.stdout_lines
+        fail_msg: Wrong host/CID or incomplete inventory; no deployment permitted.
+    - name: Probe running desktop before changing command names
+      ansible.builtin.raw: >-
+        pgrep -x sway >/dev/null ||
+        pgrep -x sl101-sway >/dev/null ||
+        pgrep -x labwc >/dev/null
+      register: active_sway
+      failed_when: false
+      changed_when: false
+      check_mode: false
+      when: sl101_cutover | bool
+    - name: Refuse hot cutover with stale live Sway keybindings
+      ansible.builtin.assert:
+        that: active_sway.rc != 0
+        fail_msg: Stop Sway under local supervision before hard command switchover.
+      when: (sl101_cutover | bool) and not ansible_check_mode
+    - name: Perform guarded no-alias public command cutover
+      ansible.builtin.include_tasks: user-commands.yml
+      when: sl101_cutover | bool
+    - name: Report identity-only read-only preview
+      ansible.builtin.debug:
+        msg: "Identity accepted; no change requested. For cutover explicitly set SL101_CUTOVER=YES."
+      when: not (sl101_cutover | bool)

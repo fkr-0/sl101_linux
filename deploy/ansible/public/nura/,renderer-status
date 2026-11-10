@@ -1,0 +1,15 @@
+#!/bin/sh
+# SL101 public command: canonical comma namespace; no sl101-* alias.
+set -eu
+runtime=${XDG_RUNTIME_DIR:-/run/sl101-desktop-user}
+if [ -r "$runtime/render-status" ]; then
+    cat "$runtime/render-status"
+else
+    echo 'renderer-status: status not available; querying live Sway' >&2
+fi
+for sock in "$runtime"/sway-ipc.*.sock; do
+    [ -S "$sock" ] || continue
+    exec swaymsg -s "$sock" -t get_outputs -r
+done
+echo 'renderer-status: compositor unavailable' >&2
+exit 1

@@ -1,0 +1,53 @@
+---
+- name: Verify full hard cutover and idempotency on both offline test roots
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    sandbox_root: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') | default('/tmp/sl101-molecule-offline', true) }}"
+  tasks:
+    - name: Probe no legacy public binaries and exact comma count
+      ansible.builtin.shell: |
+        set -eu
+        rendered="{{ sandbox_root }}/{{ item }}/rendered/bin"
+        installed="{{ sandbox_root }}/{{ item }}/root/usr/local/bin"
+        [ -d "$installed" ]
+        [ "$(find "$rendered" -maxdepth 1 -type f -name ',*' | wc -l)" -eq "$(find "$installed" -maxdepth 1 -type f -name ',*' | wc -l)" ]
+        ! find "$installed" -maxdepth 1 -name 'sl101-*' | grep -q .
+        [ -f "$installed/,browse" ]
+        [ -f "{{ sandbox_root }}/{{ item }}/root/var/lib/sl101-deploy/legacy-bin/sl101-browse" ]
+        grep -q 'legacy browser' "{{ sandbox_root }}/{{ item }}/root/var/lib/sl101-deploy/legacy-bin/sl101-browse"
+        [ -f "{{ sandbox_root }}/{{ item }}/root/home/user/.config/sway/config" ]
+        ! grep -q '/usr/local/bin/sl101-' "{{ sandbox_root }}/{{ item }}/root/home/user/.config/sway/config"
+        if [ "{{ item }}" = nura ]; then
+            init="{{ sandbox_root }}/{{ item }}/root/etc/init.d/sl101-desktop"
+            [ -x "$init" ]
+            grep -q 'command="/usr/local/bin/,desktop"' "$init"
+            grep -q 'pidfile="/run/sl101-desktop.pid"' "$init"
+        fi
+      args:
+        executable: /bin/sh
+      changed_when: false
+      loop: [nura, debian]
+
+    - name: Verify legacy references are fully replaced inside rendered executable bodies
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import pathlib,sys
+            root=pathlib.Path(sys.argv[1])
+            paths=list((root/'bin').glob(',*'))
+            assert paths
+            import re
+            all_names={f'sl101-{p.name[1:]}' for p in paths}
+            cmd_re=re.compile(r'/usr/local/bin/('+'|'.join(map(re.escape, sorted(all_names, key=len, reverse=True)))+r')(?![a-zA-Z0-9-])')
+            unresolved=[]
+            for p in paths:
+                s=p.read_text()
+                unresolved.extend((p.name,m.group(1)) for m in cmd_re.finditer(s))
+            assert not unresolved, unresolved
+          - "{{ sandbox_root }}/{{ item }}/rendered"
+      loop: [nura, debian]
+      changed_when: false

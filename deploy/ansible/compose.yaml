@@ -1,0 +1,28 @@
+name: sl101-deploy
+services:
+  deploy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sl101-ansible-control:local
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m
+    environment:
+      ANSIBLE_CONFIG: /workspace/deploy/ansible/ansible.cfg
+      ANSIBLE_HOST_KEY_CHECKING: "True"
+      ANSIBLE_LOCAL_TEMP: /tmp/.ansible-local
+      DEPLOY_TARGET: unset
+      DEPLOY_PROFILE: unset
+      SL101_CUTOVER: "${SL101_CUTOVER:-NO}"
+      SL101_APPLY: "${SL101_APPLY:-NO}"
+    volumes:
+      - ../../:/workspace:ro
+      - ./inventory:/inventory:ro
+      - ./data:/data:ro
+      - ${SL101_SSH_DIR:-${HOME}/.ssh}:/home/deploy/.ssh:ro
+      - ./.state:/home/deploy/.ansible:rw
+    command: [check]

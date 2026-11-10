@@ -1,0 +1,19 @@
+---
+# Purely host-side: no device operations, no kernel promotion.
+- name: Verify kernel candidate patch completeness and module coherence
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require VDE v2 and a complete kernel release
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../tools/verify_kernel.py"
+          - --root
+          - "{{ kernel_candidate_root }}"
+          - --release
+          - "{{ kernel_candidate_release }}"
+          - --expected-dtb-sha
+          - "{{ kernel_expected_dtb_sha }}"
+      changed_when: false
