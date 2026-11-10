@@ -1,0 +1,153 @@
+#!/bin/sh
+set -eu
+root=/opt/sl101-cog-wpe-debian
+runtime=$root/run/user/1000
+mode=software
+enter_script=sl101-cog-wpe-enter
+# Per-launch browser chrome injection; the source lives INSIDE the Debian root.
+# The WebProcess sandbox only sees a verified snapshot in its extension directory.
+inject=/var/lib/sl101-cog-chrome.js
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --gpu) mode=gpu; shift ;;
+        --software) mode=software; shift ;;
+        --enter) [ "$#" -ge 2 ] || { echo '--enter needs a helper' >&2; exit 64; }; enter_script=$2; shift 2 ;;
+        --inject-script) [ "$#" -ge 2 ] || { echo '--inject-script needs a file' >&2; exit 64; }; inject=$2; shift 2 ;;
+        --no-inject) inject=; shift ;;
+        --) shift; break ;;
+        *) break ;;
+    esac
+done
+export SL101_WPE_SKIA_COMPOSITION=${SL101_WPE_SKIA_COMPOSITION:-0}
+case "$SL101_WPE_SKIA_COMPOSITION" in
+    0|1) ;;
+    *) echo "SL101_WPE_SKIA_COMPOSITION must be 0 or 1" >&2; exit 2 ;;
+esac
+
+# Compositor discovery. The desktop is Sway (pid in /run/sl101-desktop.pid, process name sl101-sway); labwc, the
+# earlier desktop, is kept as a fallback.  Sway does not export WAYLAND_DISPLAY into its own environment, so when it is
+# missing the compositor's single wayland-N socket in its runtime directory is used (refuse if that is ambiguous).
+compositor=
+if [ -r /run/sl101-desktop.pid ]; then
+    pid=$(cat /run/sl101-desktop.pid 2>/dev/null || true)
+    case $pid in ''|*[!0-9]*) pid= ;; esac
+    if [ -n "$pid" ] && [ "$(cat "/proc/$pid/comm" 2>/dev/null || true)" = sl101-sway ]; then
+        compositor=$pid
+    fi
+fi
+[ -n "$compositor" ] || compositor=$(pgrep -xo labwc 2>/dev/null || true)
+[ -n "$compositor" ] || { echo "no running desktop compositor (sl101-sway or labwc)" >&2; exit 1; }
+desktop_runtime=$(tr '\0' '\n' <"/proc/$compositor/environ" 2>/dev/null |
+    sed -n 's/^XDG_RUNTIME_DIR=//p' | head -n 1)
+wayland_display=$(tr '\0' '\n' <"/proc/$compositor/environ" 2>/dev/null |
+    sed -n 's/^WAYLAND_DISPLAY=//p' | head -n 1)
+[ -n "$desktop_runtime" ] || { echo "compositor has no XDG_RUNTIME_DIR" >&2; exit 1; }
+if [ -z "$wayland_display" ]; then
+    sockets=0
+    for candidate in "$desktop_runtime"/wayland-*; do
+        case $candidate in *.lock) continue ;; esac
+        [ -S "$candidate" ] || continue
+        wayland_display=${candidate##*/}
+        sockets=$((sockets + 1))
+    done
+    [ "$sockets" -eq 1 ] || { echo "cannot determine the compositor Wayland socket ($sockets candidates)" >&2; exit 1; }
+fi
+host_wayland=$desktop_runtime/$wayland_display
+[ -S "$host_wayland" ]
+
+render_node=$(find /dev/dri -maxdepth 1 -name 'renderD*' -print -quit)
+[ -n "$render_node" ]
+render_gid=$(stat -c %g "$render_node")
+
+mkdir -p "$root/dev/dri" "$root/sys" "$runtime" "$runtime/pulse"
+chown 1000:1000 "$runtime" "$runtime/pulse"
+chmod 700 "$runtime" "$runtime/pulse"
+
+is_mounted() {
+    awk -v path="$1" '$2 == path { found=1 } END { exit(found ? 0 : 1) }' /proc/mounts
+}
+
+unmount_all() {
+    path=$1
+    count=0
+    while is_mounted "$path"; do
+        umount "$path" 2>/dev/null || break
+        count=$((count + 1))
+        [ "$count" -lt 64 ] || {
+            echo "refusing excessive mount stack at $path" >&2
+            return 1
+        }
+    done
+}
+
+# File bind mounts are not reliably recognized by BusyBox mountpoint. Collapse
+# any historical stacks before installing one fresh bind.
+for dev in null zero full random urandom tty; do
+    target="$root/dev/$dev"
+    unmount_all "$target"
+    touch "$target"
+    mount --bind "/dev/$dev" "$target"
+done
+is_mounted "$root/dev/dri" || mount --rbind /dev/dri "$root/dev/dri"
+is_mounted "$root/proc" || mount -t proc proc "$root/proc"
+is_mounted "$root/sys" ||
+    mount -t sysfs -o ro,nosuid,nodev,noexec sysfs "$root/sys"
+is_mounted "$root/dev/shm" ||
+    mount -t tmpfs -o size=160m,nosuid,nodev tmpfs "$root/dev/shm"
+cp /etc/resolv.conf "$root/etc/resolv.conf"
+
+# Install the requested JS only as an atomic, sandbox-visible snapshot.
+# Read the source *as the browser uid* to catch permission mistakes; do not
+# weaken WebKit sandboxing or expose the entire /var/lib directory.
+SL101_COG_JS_READY=0
+if [ -n "$inject" ]; then
+    case "$inject" in /*) ;; *) echo 'injection source must be an absolute chroot path' >&2; exit 64 ;; esac
+    extdir=$root/usr/lib/sl101-cog-extensions
+    src=$root$inject
+    [ -f "$src" ] && [ ! -L "$src" ] || { echo 'Cog injection source missing or linked' >&2; exit 65; }
+    [ -f "$extdir/libsl101-cog-inject.so" ] && [ ! -L "$extdir/libsl101-cog-inject.so" ] ||
+        { echo 'Cog WebKit extension missing or linked' >&2; exit 65; }
+    [ -d "$extdir" ] && [ ! -L "$extdir" ] || { echo 'unsafe WebKit extension directory' >&2; exit 65; }
+    snapshot=$extdir/sl101-cog-script.js
+    tmp=$extdir/.sl101-cog-script.$$.new
+    umask 077
+    if ! chroot "$root" /usr/bin/setpriv --reuid=1000 --regid=1000 --clear-groups \
+        /bin/cat -- "$inject" > "$tmp"; then
+        rm -f "$tmp"
+        echo 'cannot read Cog injection source as browser uid' >&2
+        exit 66
+    fi
+    [ -s "$tmp" ] || { rm -f "$tmp"; echo 'empty Cog injection source' >&2; exit 66; }
+    chmod 0644 "$tmp"
+    mv -f "$tmp" "$snapshot"
+    SL101_COG_JS_READY=1
+fi
+export SL101_COG_JS_READY
+
+# Earlier launchers stacked file binds on this path. Always collapse the
+# complete stack before binding the compositor's current socket.
+unmount_all "$runtime/wayland-0"
+rm -f "$runtime/wayland-0"
+touch "$runtime/wayland-0"
+
+# Grant only the unprivileged browser uid access to the active compositor
+# socket. ACL keeps the desktop user's ownership intact; the group fallback is
+# used only when ACL tooling is unavailable.
+if command -v setfacl >/dev/null 2>&1; then
+    setfacl -m u:1000:rw "$host_wayland"
+else
+    chgrp 1000 "$host_wayland"
+    chmod g+rw "$host_wayland"
+fi
+mount --bind "$host_wayland" "$runtime/wayland-0"
+
+test -S /run/sl101-audio/pulse-browser
+unmount_all "$runtime/pulse/native"
+rm -f "$runtime/pulse/native"
+touch "$runtime/pulse/native"
+chgrp 1000 /run/sl101-audio/pulse-browser
+chmod 660 /run/sl101-audio/pulse-browser
+mount --bind /run/sl101-audio/pulse-browser "$runtime/pulse/native"
+
+url=${1:-https://wpewebkit.org/}
+exec unshare --mount --fork /usr/local/libexec/"$enter_script"     "$mode" "$render_gid" "$url"

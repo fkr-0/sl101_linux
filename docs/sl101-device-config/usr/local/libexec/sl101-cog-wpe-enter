@@ -1,0 +1,58 @@
+#!/bin/sh
+set -eu
+mode=$1
+render_gid=$2
+shift 2
+root=/opt/sl101-cog-wpe-debian
+mount --make-rprivate /
+mount --rbind "$root" "$root"
+cd "$root"
+mkdir -p .sl101-host-root
+pivot_root . .sl101-host-root
+cd /
+umount -l /.sl101-host-root
+# The privileged host launcher prepared a script snapshot before entering.
+# Older launchers do not set the flag and retain their no-injection behavior.
+injection=${SL101_COG_JS_READY:-0}
+case "$injection" in 0|1) ;; *) echo 'invalid JS injection state' >&2; exit 64 ;; esac
+if [ "$injection" = 1 ]; then
+    [ -r /usr/lib/sl101-cog-extensions/libsl101-cog-inject.so ] &&
+    [ -r /usr/lib/sl101-cog-extensions/sl101-cog-script.js ] ||
+        { echo 'incomplete WebKit JS extension' >&2; exit 65; }
+    set -- --web-extensions-dir=/usr/lib/sl101-cog-extensions "$@"
+    inject_path=/usr/lib/sl101-cog-extensions/sl101-cog-script.js
+else
+    inject_path=
+fi
+if [ "$mode" = gpu ]; then
+    # WebKit's damage-based compositing (buffer age) treats the second window buffer as already valid on this
+    # EGL/Grate chain, so only partial repaints reach it and the rest shows uninitialised memory (video noise).
+    # Disabling it repaints every frame completely. See docs/sl101-yuv-multipass-driver-20261109.md.
+    lib=/opt/grate-mesa25-clean/lib/arm-linux-gnueabihf
+    test -d "$lib"
+    exec /usr/bin/setpriv --reuid=1000 --regid=1000 --groups "$render_gid" \
+      /usr/bin/env -i HOME=/home/browser USER=browser LOGNAME=browser PATH=/usr/bin:/bin \
+      LANG=C.UTF-8 XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 \
+      WEBKIT_SKIA_ENABLE_CPU_RENDERING=1 \
+      SL101_COG_INJECT_SCRIPT="$inject_path" \
+      WEBKIT_USE_SKIA_FOR_COMPOSITION="${SL101_WPE_SKIA_COMPOSITION:-0}" \
+      LD_LIBRARY_PATH="/opt/sl101-webp-nosimd/lib:$lib:$lib/gbm:$lib/dri" \
+      GBM_BACKENDS_PATH="$lib/gbm" LIBGL_DRIVERS_PATH="$lib/dri" MESA_LOADER_DRIVER_OVERRIDE=grate \
+      /usr/bin/dbus-run-session -- /usr/bin/cog --platform=wl \
+      --features=-UseDamagingInformationForCompositing "$@"
+fi
+# Software mode needs WebKit's CPU Skia renderer as well (like the GPU branch above): without it WebKit tries GPU
+# rendering on top of softpipe and the window stays unpainted (the Sway background colour shows through).
+# Debian armhf libwebp 1.6.0-0.1 executes NEON/VFP d16+ code on Tegra20
+# despite the CPU exposing only VFPv3-D16 and no NEON. The software-first
+# browser uses a source-identical WEBP_ENABLE_SIMD=OFF build from this private
+# prefix; the system package and later GPU path remain untouched.
+exec /usr/bin/setpriv --reuid=1000 --regid=1000 --groups "$render_gid" \
+  /usr/bin/env -i HOME=/home/browser USER=browser LOGNAME=browser PATH=/usr/bin:/bin \
+  LANG=C.UTF-8 XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 \
+  WEBKIT_SKIA_ENABLE_CPU_RENDERING=1 \
+  SL101_COG_INJECT_SCRIPT="$inject_path" \
+  WEBKIT_USE_SKIA_FOR_COMPOSITION="${SL101_WPE_SKIA_COMPOSITION:-0}" \
+  LD_LIBRARY_PATH=/opt/sl101-webp-nosimd/lib \
+  LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=softpipe MESA_LOADER_DRIVER_OVERRIDE=swrast \
+  /usr/bin/dbus-run-session -- /usr/bin/cog --platform=wl "$@"
