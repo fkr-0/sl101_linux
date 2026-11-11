@@ -70,30 +70,47 @@
     - "{{ nura_release_root }}/bin"
   when: not ansible_check_mode
 
-- name: Stage only exact CI-verified ARMv7 musl executables
+- name: Transfer the single SHA-pinned complete CI artifact (all widgets and assets)
   become: "{{ not (sl101_molecule | default(false) | bool) }}"
   ansible.builtin.copy:
-    src: "{{ nura_ci_payload }}/release/bin/{{ item }}"
-    dest: "{{ nura_release_root }}/bin/{{ item }}"
-    owner: "{{ omit if (sl101_molecule | default(false) | bool) else 'root' }}"
-    group: "{{ omit if (sl101_molecule | default(false) | bool) else 'root' }}"
-    mode: "0755"
-    follow: false
-  loop: "{{ nura_ci_binaries }}"
-  loop_control:
-    label: "{{ item }}"
-  when: not ansible_check_mode
-
-- name: Stage controller-generated checksums and original CI manifest
-  become: "{{ not (sl101_molecule | default(false) | bool) }}"
-  ansible.builtin.copy:
-    src: "{{ nura_ci_payload }}/release/{{ item }}"
-    dest: "{{ nura_release_root }}/{{ item }}"
+    src: "{{ nura_ci_payload }}/nuraloumi-ci.tar"
+    dest: "{{ nura_release_root }}/nuraloumi-ci.tar"
     owner: "{{ omit if (sl101_molecule | default(false) | bool) else 'root' }}"
     group: "{{ omit if (sl101_molecule | default(false) | bool) else 'root' }}"
     mode: "0644"
     follow: false
-  loop: [MANIFEST.txt, SHA256SUMS.bin]
+  when: not ansible_check_mode
+
+- name: Confirm preserved CI tar matches reviewed SHA on the target
+  become: "{{ not (sl101_molecule | default(false) | bool) }}"
+  ansible.builtin.command:
+    argv: [sha256sum, "{{ nura_release_root }}/nuraloumi-ci.tar"]
+  register: nura_remote_tar_sha
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Refuse archive that differs from the exact Git-reviewed GitHub run
+  ansible.builtin.assert:
+    that:
+      - nura_remote_tar_sha.stdout.split()[0] == nuraloumi_approved_tar_sha256
+  when: not ansible_check_mode and not (sl101_molecule | default(false) | bool)
+
+- name: Extract complete verified CI package into the inactive release
+  become: "{{ not (sl101_molecule | default(false) | bool) }}"
+  ansible.builtin.command:
+    argv: [tar, -xf, "{{ nura_release_root }}/nuraloumi-ci.tar", -C, "{{ nura_release_root }}"]
+    creates: "{{ nura_release_root }}/CI-READY"
+  when: not ansible_check_mode
+
+- name: Stage controller-generated binary checksums
+  become: "{{ not (sl101_molecule | default(false) | bool) }}"
+  ansible.builtin.copy:
+    src: "{{ nura_ci_payload }}/release/SHA256SUMS.bin"
+    dest: "{{ nura_release_root }}/SHA256SUMS.bin"
+    owner: "{{ omit if (sl101_molecule | default(false) | bool) else 'root' }}"
+    group: "{{ omit if (sl101_molecule | default(false) | bool) else 'root' }}"
+    mode: "0644"
+    follow: false
   when: not ansible_check_mode
 
 - name: Stage audited CI provenance without writing into boot or active symlinks
@@ -131,7 +148,9 @@
 - name: Verify exact remote installed bytes before marking staging ready
   become: "{{ not (sl101_molecule | default(false) | bool) }}"
   ansible.builtin.command:
-    argv: [sha256sum, --strict, --check, SHA256SUMS.bin]
+    # BusyBox on Nura edge does not support GNU sha256sum --strict.
+    # Both GNU coreutils and BusyBox accept -cw and fail on bad hashes.
+    argv: [sha256sum, -cw, SHA256SUMS.bin]
     chdir: "{{ nura_release_root }}"
   changed_when: false
   when: not ansible_check_mode

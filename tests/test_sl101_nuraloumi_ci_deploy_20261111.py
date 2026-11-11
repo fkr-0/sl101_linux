@@ -9,6 +9,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import tarfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,6 +51,9 @@ def make_fixture(root):
     (root / "release/SHA256SUMS.bin").write_text(
         "".join(f"{sums['bin/' + n]}  bin/{n}\n" for n in NAMES)
     )
+    with tarfile.open(root / "nuraloumi-ci.tar", "w") as archive:
+        for path in sorted((root / "release").rglob("*")):
+            archive.add(path, arcname=path.relative_to(root / "release"))
     (root / "ELF-AUDIT.txt").write_text("SYNTHETIC TEST, NOT AN AUDIT\n")
     (root / "CI-PROVENANCE.json").write_text(json.dumps({
         "schema": PAYLOAD.SCHEMA,
@@ -57,7 +61,7 @@ def make_fixture(root):
         "run_id": RUN,
         "target": PAYLOAD.TARGET,
         "ci_conclusion": "success",
-        "ci_tar_sha256": "a" * 64,
+        "ci_tar_sha256": PAYLOAD.sha256(root / "nuraloumi-ci.tar"),
         "manifest_sha256": PAYLOAD.sha256(root / "release/MANIFEST.txt"),
         "binaries": NAMES,
         "synthetic_test_only": True,

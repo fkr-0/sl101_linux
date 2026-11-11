@@ -1,0 +1,153 @@
+---
+# Exact-CI-stage -> symlink activation -> single-panel restart and runtime
+# health check. Never touches Sway itself, kernel, boot, Mesa or APK trust.
+# The CI stage playbook enforces all physical/provenance preconditions first.
+- import_playbook: nuraloumi-stage.yml
+
+- name: Enable the entire CI NuraLoumi suite on the already-qualified .106
+  hosts: sl101-nura
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    nura_ci_sha: "{{ lookup('ansible.builtin.env', 'SL101_NURALOUMI_SHA', default='') }}"
+    nura_activation_tool: "{{ playbook_dir }}/../tools/nuraloumi_activate.py"
+    nura_activation_args: >-
+      --sha {{ nura_ci_sha }} --expected-old {{ nuraloumi_previous_current }}
+  pre_tasks:
+    - name: Require separate explicit activation approval and matching CI SHA
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'sl101-nura'
+          - ansible_play_hosts_all | length == 1
+          - nura_ci_sha == nuraloumi_approved_git_sha
+          - ansible_check_mode or
+            (lookup('ansible.builtin.env', 'SL101_APPLY', default='NO') == 'YES'
+             and lookup('ansible.builtin.env', 'SL101_NURALOUMI_STAGE', default='NO') == 'YES'
+             and lookup('ansible.builtin.env', 'SL101_NURALOUMI_ACTIVATE', default='NO') == 'YES')
+        fail_msg: "CI activation needs separate approval, all three gates and the exact reviewed Git SHA."
+
+    - name: Capture only session variables needed for the existing live-panel hook
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import glob, json, os, sys
+            allowed = ("HOME", "XDG_RUNTIME_DIR", "XDG_STATE_HOME",
+                       "XDG_SESSION_TYPE", "WAYLAND_DISPLAY", "SWAYSOCK", "DISPLAY")
+            for entry in glob.glob("/proc/[0-9]*/"):
+                try:
+                    if open(entry + "comm").read().strip() != "nuraloumi-panel":
+                        continue
+                    if os.stat(entry).st_uid != os.getuid():
+                        continue
+                    raw = open(entry + "environ", "rb").read()
+                    source = dict(field.decode(errors="replace").split("=", 1)
+                                  for field in raw.split(b"\0") if b"=" in field)
+                    chosen = {k: source[k] for k in allowed if k in source}
+                    if chosen.get("HOME") != "/home/user":
+                        continue
+                    if chosen.get("XDG_RUNTIME_DIR") != "/run/sl101-desktop-user":
+                        continue
+                    if not chosen.get("WAYLAND_DISPLAY", "").startswith("wayland-"):
+                        continue
+                    if not os.path.exists(os.path.join(chosen["XDG_RUNTIME_DIR"],
+                                                       chosen["WAYLAND_DISPLAY"])):
+                        continue
+                    print(json.dumps(chosen, sort_keys=True))
+                    sys.exit(0)
+                except (OSError, UnicodeError, ValueError):
+                    continue
+            sys.exit("No owner-matched active panel Wayland session")
+      register: nura_session_raw
+      changed_when: false
+      check_mode: false
+
+    - name: Capture authenticated live Wayland environment
+      ansible.builtin.set_fact:
+        nura_session_env: "{{ nura_session_raw.stdout | from_json }}"
+      changed_when: false
+
+    - name: Check exact staged release and preexisting CLI collisions before promotion
+      ansible.builtin.script: >-
+        {{ nura_activation_tool }} {{ nura_activation_args }} check
+      changed_when: false
+      check_mode: false
+
+  tasks:
+    - name: Activation without desktop mutation in dry run
+      ansible.builtin.debug:
+        msg: >-
+          CI suite {{ nura_ci_sha }} is staged and activation prechecked.
+          Neither the panel nor the 24 CLI tools were switched in check mode.
+      when: ansible_check_mode
+
+    - name: Atomically activate all 24 commands and restart only NuraLoumi panel
+      when: not ansible_check_mode
+      block:
+        - name: Save old current and workspace-switcher; atomically link all new CI tools
+          ansible.builtin.script: >-
+            {{ nura_activation_tool }} {{ nura_activation_args }} activate
+          become: true
+          register: nura_activation_result
+
+        - name: Restart only the existing panel hook under original Wayland session
+          ansible.builtin.command:
+            argv: [/usr/local/bin/sl101-sway-panel]
+          environment: "{{ nura_session_env }}"
+          register: nura_panel_restarted
+          changed_when: true
+
+        - name: Verify new panel remains alive and its executable is the pinned CI binary
+          ansible.builtin.command:
+            argv:
+              - python3
+              - -c
+              - |
+                import glob, os, sys, time
+                expected = sys.argv[1]
+                time.sleep(1)
+                for p in glob.glob("/proc/[0-9]*/"):
+                    try:
+                        if os.stat(p).st_uid != os.getuid():
+                            continue
+                        if open(p + "comm").read().strip() != "nuraloumi-panel":
+                            continue
+                        if os.path.realpath(p + "exe") == expected:
+                            print("CI_PANEL_RUNNING=" + p.split("/")[2])
+                            sys.exit(0)
+                    except OSError:
+                        continue
+                sys.exit("CI_PANEL_NOT_RUNNING")
+              - "/opt/nuraloumi/releases/{{ nura_ci_sha }}/bin/nuraloumi-panel"
+          register: nura_panel_healthy
+          changed_when: false
+
+        - name: Recheck all CLI links and exact release checksums on hardware
+          ansible.builtin.script: >-
+            {{ nura_activation_tool }} {{ nura_activation_args }} verify
+          changed_when: false
+
+      rescue:
+        - name: Roll back current and all public CLI links to the exact saved release
+          ansible.builtin.script: >-
+            {{ nura_activation_tool }} {{ nura_activation_args }} rollback
+          become: true
+
+        - name: Restart the original healthy NuraLoumi panel after rollback
+          ansible.builtin.command:
+            argv: [/usr/local/bin/sl101-sway-panel]
+          environment: "{{ nura_session_env }}"
+          changed_when: true
+
+        - name: Fail closed after a reverted activation
+          ansible.builtin.fail:
+            msg: "New CI panel failed its device health check; previous release restored."
+
+  post_tasks:
+    - name: Report activation state without assuming GPU or application feature qualification
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'Preview only; existing panel unchanged.' if ansible_check_mode
+          else 'All 24 NuraLoumi CI executables activated, new panel PID verified;
+          previous release and workspace-switcher binary retained for rollback.' }}

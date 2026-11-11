@@ -1,11 +1,76 @@
 # .106 NuraLoumi CI-only Ansible preparation — 2026-11-11
 
-**Status: host preparation and successful read-only .106 preflight.**
+**Status: CI-only NuraLoumi installed and activated on .106 on 2026-11-11.**
 The first preparation did not access the device. On 2026-11-11 a subsequent
 read-only check used the workstation's already authenticated SSH
-ControlMaster connection. It did NOT deploy, flash, reboot, restart
-Sway/panel, change any kernel or eMMC/SD data, or invoke the separately
+ControlMaster connection. A later, explicitly authorized full-suite
+Ansible stage + activation has now completed successfully. It restarted
+only the NuraLoumi panel, **not Sway**, and did not flash, reboot, change
+any kernel or eMMC/SD boot data, alter Mesa, or invoke the separately
 blocked comma-command hard cutover.
+
+## Exact real-device installation receipt
+
+- Latest GitHub main SHA checked on 2026-11-11:
+  `6d4f7b2d728db3251d244bdebf38dc6e415856f5`.
+  All three GitHub Actions workflows (CI, Alpine ARMv7/musl package and
+  Debian ARMHF/glibc package) succeeded at that SHA.
+- Production-target package: original *Alpine* 0.0.4-dev.2 GitHub CI tar
+  from Actions run 42927406671, with pinned original tar SHA256
+  b4b7f2d13b981b4494c1e2d09672eed975b355d398d1e435940ce412a7fdb1fb.
+  The tar includes all 24 native executables, example config and
+  share resources/documentation. No local build and no untrusted APK
+  installation or temporary key enrollment was used.
+- Native staging result: 26 successful Ansible tasks, zero failures.
+  All 24 executable checksums verified by the target BusyBox
+  `sha256sum -cw`; the full original tar digest matched on device.
+  Every one of the 24 binaries loaded its shared-library dependency
+  closure through the musl loader with **zero missing libraries**.
+- Activation dry run: 20 successful tasks, `changed=0`,
+  `unreachable=0`, `failed=0`.
+- Real activation: **ok=35, changed=2, unreachable=0, failed=0,
+  rescued=0**. All 24 `/usr/local/bin/nuraloumi-*` commands point at
+  `/opt/nuraloumi/current/<name>`, and the active link points at
+  `/opt/nuraloumi/releases/6d4f7b2d728db3251d244bdebf38dc6e415856f5/bin`.
+- Independent postflight: `nuraloumi-panel` PID **21781** with
+  `/proc/21781/exe` resolving to the exact new CI binary
+  (SHA256 `467b183a8b1fc8c1d3eb3c3df6f3d109485b597edda13ec036283bd4784a6b33`),
+  RSS **8088 KiB**. Sway PID **1438**, WayVNC PID **1484** stayed alive;
+  24/24 installed checksums passed. The panel log reported live provider
+  snapshots and no immediate exit.
+- Rollback is saved: original release
+  `/opt/nuraloumi/releases/menu-dismiss-e4d6301` remains intact.
+  The old 1,269,476-byte workspace-switcher binary was copied to the
+  root-owned `activation-backup` subdirectory of the new release,
+  with `activation-rollback.json` recording the original active link
+  and all 24 prior CLI states. The journal's `status=active` is
+  authoritative; `CI-READY` is a staging-time receipt and its
+  `ACTIVATED=false` field is NOT a current activation-status indication.
+
+The physical user interface still needs interactive human hardware QA:
+touch, keyboard, renderer labels, each popup/menu, file manager,
+image viewer, Open-With, notifications, calendar, weather, media,
+network feed, screenshot and WayVNC visibility. These cannot be
+deduced from successful ELF/process checks alone.
+
+### Manual recovery route
+
+The separately gated `deploy/ansible/playbooks/nuraloumi-rollback.yml`
+performs the complete manual rollback, including physical identity checks,
+restoring the old CLI/workspace-switcher, restarting only the old
+NuraLoumi panel and asserting the old /proc/PID/exe. **Do not run this
+unless the operator actually requests rollback.**
+
+    export SL101_NURALOUMI_SHA=6d4f7b2d728db3251d244bdebf38dc6e415856f5
+    export ANSIBLE_SSH_ARGS='-o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ControlMaster=auto'
+    SL101_APPLY=YES SL101_NURALOUMI_ROLLBACK=YES \
+      ansible-playbook -i deploy/ansible/inventory/hosts.yml \
+        deploy/ansible/playbooks/nuraloumi-rollback.yml --limit sl101-nura
+
+The activation playbook also automatically invokes the same helper and
+relaunches the previous panel if its new-panel health check fails.
+Never discard the stored activation-rollback.json or the backed-up
+workspace-switcher until interactive qualification has been accepted.
 
 ## Actual read-only Ansible preflight receipt
 
@@ -82,19 +147,18 @@ before any remote write.
 | --- | --- |
 | Controller prepare | Downloads from GitHub to local ignored data only; no tablet |
 | 'deploy nuraloumi-check' | Read-only SSH identity, exact pinned CI checks, capacity/parent safety; copy tasks explicitly skipped |
-| 'deploy nuraloumi-stage' with both gates | Only versioned copies to /opt/nuraloumi/releases/<sha>/bin; remote hash checks and CI-READY |
-| Live activation | NOT implemented or authorized by this preparation |
+| 'deploy nuraloumi-stage' with both gates | Versioned full CI archive (24 binaries + resources), remote hashes and CI-READY; no live desktop change |
+| `nuraloumi-activate.yml` with three explicit gates | Atomic active-release switch, 24 CLI symlinks, single-panel restart, postflight and automatic rollback on failure |
 
 There is no APK installation, ephemeral-key enrollment, kernel/boot/Mesa
-mutation, Sway reload, WayVNC/keyd/init change or replacement of current.
-The real installation parents use setgid and a device-specific group;
-staging deliberately preserves their existing group and mode rather
-than normalizing them to root:root 0755.
-Files under /opt/nuraloumi/releases/<sha>/bin are inert until the operator
-explicitly authorizes promotion. The existing launcher reads
-/opt/nuraloumi/current/nuraloumi-panel, so any future activation must
-atomically point current at the release's bin directory, preserve the
-old target and qualify the separately configured Sway workspace switcher.
+mutation, Sway reload, WayVNC/keyd/init change or system-wide renderer swap.
+The installation parents use setgid and a device-specific group; the
+staging tasks preserve their existing group and mode, rather than
+normalizing them to root:root 0755. The activation playbook DID update
+`/opt/nuraloumi/current` and all 24 `nuraloumi-*` CLI links explicitly,
+following prior preservation and with an automatic rollback path.
+The existing Sway workspace-switcher invocation at `/usr/local/bin`
+now follows the current CI release.
 
 ## Required gates
 
@@ -103,14 +167,13 @@ old target and qualify the separately configured Sway workspace switcher.
 2. Confirm .106 health, physical identity, usable sudo, SD free space and
    known-good recovery route; never assume successful eMMC flash alone
    qualifies userspace or APX recovery.
-3. Run read-only nuraloumi-check first, then explicitly approve
-   nuraloumi-stage. On changed kernel, eMMC/SD identities, or root source:
-   stop and review the inventory, never bypass the assertion.
-4. Qualify the staged binary set on actual Tegra20: no SIGILL, panel
-   renderer truth, Cairo/wl_shm, files/viewer, XDG/open-with, keyboard,
-   touchscreen, workspace picker, memory/CPU and recovery.
-5. A **separate** reviewed promotion and rollback plan is mandatory
-   before touching /opt/nuraloumi/current or /usr/local/bin.
+3. Complete read-only NuraLoumi preflight and exact CI package staging.
+   Both PASSED, including on-device 24/24 SHA256 and musl dependencies.
+4. Run the separately approved activation playbook and validate live PID,
+   /proc/PID/exe, CLI links and rollback. PASSED with Sway untouched.
+5. Remaining: interactively qualify the actual pixel output, renderer
+   truth, Cairo/wl_shm, files/viewer, XDG/open-with, keyboard, touchscreen,
+   workspace picker, network, memory/CPU stability and recovery on device.
 
 The CI Alpine APK is currently development-signed with an ephemeral
 per-run key. This playbook stages the CI tar's verified binaries rather

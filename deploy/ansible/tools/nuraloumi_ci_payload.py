@@ -113,6 +113,11 @@ def verify_payload(root, sha, run_id, expected_tar_sha=None, expected_manifest_s
     demand(sha256(mf) == proof.get("manifest_sha256"), "manifest proof mismatch")
     demand(bool(DIGEST_RE.fullmatch(proof.get("ci_tar_sha256", ""))),
            "missing source tar SHA256")
+    bundled = root / "nuraloumi-ci.tar"
+    if bundled.exists():
+        demand(bundled.is_file() and not bundled.is_symlink() and
+               sha256(bundled) == proof["ci_tar_sha256"],
+               "preserved CI tar differs from verified original")
     if expected_tar_sha is not None:
         demand(proof["ci_tar_sha256"] == expected_tar_sha,
                "CI tar digest differs from repository-approved immutable digest")
@@ -185,6 +190,10 @@ def import_verified_download(download, candidate, sha, run_id):
            "declared binaries not present exactly")
     shutil.copy2(mf_path, candidate / "release/MANIFEST.txt")
     shutil.copy2(download / "ELF-AUDIT.txt", candidate / "ELF-AUDIT.txt")
+    # Keep the original verified CI tar for one-copy Ansible deployment.
+    # This includes *all* shipped widgets, menus, tools, config examples and
+    # share/ documentation, not just the 24 executable files.
+    shutil.copy2(tar_path, candidate / "nuraloumi-ci.tar")
     with (candidate / "release/SHA256SUMS.bin").open("x") as stream:
         for name in binary_names:
             stream.write(f"{source_digests['bin/' + name]}  bin/{name}\n")

@@ -1,0 +1,118 @@
+---
+# Explicit manual rollback for a late UI regression after a green activation.
+# No kernel/Sway/Mesa/APK operations. Expects the guarded activation journal.
+- name: Restore previous NuraLoumi release on the exact Alpine .106 tablet
+  hosts: sl101-nura
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    nura_ci_sha: "{{ lookup('ansible.builtin.env', 'SL101_NURALOUMI_SHA', default='') }}"
+    nura_activation_tool: "{{ playbook_dir }}/../tools/nuraloumi_activate.py"
+  pre_tasks:
+    - name: Require exact .106 and explicitly authorized rollback
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'sl101-nura'
+          - ansible_play_hosts_all | length == 1
+          - ansible_host == '192.168.23.106'
+          - nura_ci_sha == nuraloumi_approved_git_sha
+          - not ansible_check_mode
+          - lookup('ansible.builtin.env', 'SL101_APPLY', default='NO') == 'YES'
+          - lookup('ansible.builtin.env', 'SL101_NURALOUMI_ROLLBACK', default='NO') == 'YES'
+        fail_msg: "Manual rollback requires exact pinned release and BOTH authorization gates."
+
+    - name: Recheck physical hostname, eMMC/SD CIDs, root and Nura/musl ID
+      ansible.builtin.raw: |
+        printf 'HOST=%s\n' "$(hostname)"
+        printf 'EMMC_CID=%s\n' "$(cat /sys/block/mmcblk0/device/cid)"
+        printf 'SD_CID=%s\n' "$(cat /sys/block/mmcblk1/device/cid)"
+        printf 'ROOT=%s\n' "$(findmnt -n -o SOURCE /)"
+        . /etc/os-release
+        printf 'OS_ID=%s\n' "$ID"
+      register: nura_rollback_identity
+      changed_when: false
+      check_mode: false
+
+    - name: Reject any incorrect device before modifying the active panel
+      ansible.builtin.assert:
+        that:
+          - ('HOST=' ~ expected_hostname) in nura_rollback_identity.stdout_lines
+          - ('EMMC_CID=' ~ expected_emmc_cid) in nura_rollback_identity.stdout_lines
+          - ('SD_CID=' ~ expected_sd_cid) in nura_rollback_identity.stdout_lines
+          - ('ROOT=' ~ expected_root_source) in nura_rollback_identity.stdout_lines
+          - ('OS_ID=' ~ expected_os_id) in nura_rollback_identity.stdout_lines
+
+    - name: Capture original Wayland variables from the current panel process
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import glob, json, os, sys
+            keys = ("HOME", "XDG_RUNTIME_DIR", "XDG_STATE_HOME",
+                    "XDG_SESSION_TYPE", "WAYLAND_DISPLAY", "SWAYSOCK", "DISPLAY")
+            for p in glob.glob("/proc/[0-9]*/"):
+                try:
+                    if os.stat(p).st_uid != os.getuid():
+                        continue
+                    if open(p + "comm").read().strip() != "nuraloumi-panel":
+                        continue
+                    raw = open(p + "environ", "rb").read()
+                    env = dict(x.decode(errors="replace").split("=", 1)
+                               for x in raw.split(b"\0") if b"=" in x)
+                    selected = {k: env[k] for k in keys if k in env}
+                    if (selected.get("HOME") == "/home/user" and
+                        selected.get("XDG_RUNTIME_DIR") == "/run/sl101-desktop-user" and
+                        selected.get("WAYLAND_DISPLAY", "").startswith("wayland-")):
+                        print(json.dumps(selected))
+                        sys.exit(0)
+                except (OSError, ValueError, UnicodeError):
+                    continue
+            sys.exit("No qualifying current NuraLoumi panel environment")
+      register: nura_rollback_session_raw
+      changed_when: false
+
+    - name: Save the verified current Wayland environment for panel-only restart
+      ansible.builtin.set_fact:
+        nura_rollback_session_env: "{{ nura_rollback_session_raw.stdout | from_json }}"
+      changed_when: false
+
+  tasks:
+    - name: Restore exact old current link and saved workspace-switcher binary
+      become: true
+      ansible.builtin.script: >-
+        {{ nura_activation_tool }} --sha {{ nura_ci_sha }} rollback
+
+    - name: Restart only the previous NuraLoumi panel
+      ansible.builtin.command:
+        argv: [/usr/local/bin/sl101-sway-panel]
+      environment: "{{ nura_rollback_session_env }}"
+      changed_when: true
+
+    - name: Verify original panel executable is running again
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import glob, os, sys, time
+            time.sleep(1)
+            expected = sys.argv[1]
+            for p in glob.glob("/proc/[0-9]*/"):
+                try:
+                    if os.stat(p).st_uid == os.getuid() and \
+                       open(p + "comm").read().strip() == "nuraloumi-panel" and \
+                       os.path.realpath(p + "exe") == expected:
+                        print("OLD_PANEL_RESTORED=" + p.split("/")[2])
+                        sys.exit(0)
+                except OSError:
+                    pass
+            sys.exit("OLD_PANEL_NOT_RUNNING")
+          - "{{ nuraloumi_previous_current }}/nuraloumi-panel"
+      changed_when: false
+
+    - name: Display rollback completion
+      ansible.builtin.debug:
+        msg: >-
+          Restored {{ nuraloumi_previous_current }}, old workspace switcher
+          and original NuraLoumi panel; Sway and WayVNC untouched.

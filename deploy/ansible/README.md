@@ -152,11 +152,43 @@ remote SHA256 before marking CI-READY. It does NOT update current,
 install an APK or key, replace /usr/local/bin binaries, restart a panel,
 modify Sway/Mesa/WayVNC, or change the kernel.
 
-Current launcher uses /opt/nuraloumi/current/nuraloumi-panel (rather
-than current/bin/panel). Any future separately authorized promotion
-must point current to releases/<sha>/bin, preserve the previous active
-release, and handle the Sway workspace-switcher in /usr/local/bin.
-See docs/sl101-106-nuraloumi-ci-ansible-20261111.md.
+The stage imports the **complete original CI tar** (not a local build):
+all 24 ARMHF/musl executables plus config/share resources and original
+documentation, cross-checked against the Git-reviewed tar SHA256. It
+intentionally uses a versioned inactive release. A separate activation
+playbook has its own explicit third approval gate:
+
+    export SL101_NURALOUMI_SHA=6d4f7b2d728db3251d244bdebf38dc6e415856f5
+    export SL101_NURALOUMI_RUN_ID=42927406671
+    export ANSIBLE_SSH_ARGS='-o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ControlMaster=auto'
+    ansible-playbook -i deploy/ansible/inventory/hosts.yml \
+      deploy/ansible/playbooks/nuraloumi-activate.yml --limit sl101-nura --check
+    SL101_APPLY=YES SL101_NURALOUMI_STAGE=YES SL101_NURALOUMI_ACTIVATE=YES \
+      ansible-playbook -i deploy/ansible/inventory/hosts.yml \
+        deploy/ansible/playbooks/nuraloumi-activate.yml --limit sl101-nura
+
+The activation tool atomically points /opt/nuraloumi/current at the
+release's bin directory, installs all 24 canonical CLI names under
+/usr/local/bin as links to the active current version, and preserves the
+old current link plus the prior workspace-switcher executable. It then
+restarts ONLY the NuraLoumi panel through the existing
+/usr/local/bin/sl101-sway-panel hook using the live Wayland environment.
+The playbook checks the real new /proc/PID/exe and all 24 symlinks.
+Any failure enters a rollback block, restoring the old link, old
+workspace switcher and old panel without touching Sway.
+
+**2026-11-11 production-device receipt:** this exact latest CI run was
+successfully installed and activated on .106: Ansible ok=35,
+changed=2, failed=0. The final panel PID was 21781 with 8088 KiB
+VmRSS, the compositor PID 1438 and WayVNC PID 1484 stayed unchanged,
+all 24 binaries passed SHA256 and 24/24 dynamic dependency checks.
+The previous release is still /opt/nuraloumi/releases/menu-dismiss-e4d6301.
+These are device/process/linker checks, not an interactive UI/pixel
+qualification of every surface. See
+docs/sl101-106-nuraloumi-ci-ansible-20261111.md for provenance and
+rollback. The separate playbooks/nuraloumi-rollback.yml is the
+explicitly authorized, identity-guarded full manual restoration path;
+do not execute it until requested.
 
 ## Remaining porting
 
