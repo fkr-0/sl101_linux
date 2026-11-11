@@ -17,6 +17,7 @@ browser_sources = files(
   'src/navigation/state.c',
   'src/navigation/url.c',
   'src/control/control.c',
+  'src/control/remote.c',
 )
 
 glib = dependency('glib-2.0', version: '>=2.70', required: true)
@@ -75,4 +76,8 @@ test('control-ipc-host', shell,
 # fake WebKit type/behavior exists only inside this CPU integration test.
 test('navigation-control-integration-host', shell,
   args: [meson.project_source_root() / 'tests/run-crosslane-host.sh'],
+  timeout: 120)
+
+test('browser-remote-client-host', shell,
+  args: [meson.project_source_root() / 'tests/run-remote-host.sh'],
   timeout: 120)

@@ -7,26 +7,40 @@ export LC_ALL=C
 fail() { printf 'NuraBrowser: %s\n' "$*" >&2; exit 1; }
 usage() {
     printf 'Usage: ,browse [--renderer software|grate] [--platform headless|wayland|drm] [--url https://host/]\n'
+    printf '       ,browse --command open --url https://host/\n'
+    printf '       ,browse --command back|forward|reload|stop|uri\n'
 }
 
 renderer=software
 platform=headless
 url=https://example.org/
+command=
+command_set=0
+renderer_set=0
+platform_set=0
+url_set=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --help|-h) usage; exit 0 ;;
         --renderer)
             [ "$#" -ge 2 ] || fail '--renderer needs a value'
-            renderer=$2; shift 2 ;;
-        --renderer=*) renderer=${1#*=}; shift ;;
+            renderer=$2; renderer_set=1; shift 2 ;;
+        --renderer=*) renderer=${1#*=}; renderer_set=1; shift ;;
         --platform)
             [ "$#" -ge 2 ] || fail '--platform needs a value'
-            platform=$2; shift 2 ;;
-        --platform=*) platform=${1#*=}; shift ;;
+            platform=$2; platform_set=1; shift 2 ;;
+        --platform=*) platform=${1#*=}; platform_set=1; shift ;;
         --url)
             [ "$#" -ge 2 ] || fail '--url needs a value'
-            url=$2; shift 2 ;;
-        --url=*) url=${1#*=}; shift ;;
+            url=$2; url_set=1; shift 2 ;;
+        --url=*) url=${1#*=}; url_set=1; shift ;;
+        --command)
+            [ "$#" -ge 2 ] || fail '--command needs a value'
+            [ "$command_set" -eq 0 ] || fail '--command may be specified once'
+            command=$2; command_set=1; shift 2 ;;
+        --command=*)
+            [ "$command_set" -eq 0 ] || fail '--command may be specified once'
+            command=${1#*=}; command_set=1; shift ;;
         --*) fail "unknown option: $1" ;;
         *) fail 'positional arguments are forbidden; use --url' ;;
     esac
@@ -34,6 +48,20 @@ done
 
 case "$renderer" in software|grate) ;; *) fail "invalid renderer: $renderer" ;; esac
 case "$platform" in headless|wayland|drm) ;; *) fail "invalid platform: $platform" ;; esac
+if [ "$command_set" -eq 1 ]; then
+    [ -n "$command" ] || fail 'empty --command'
+    [ "$renderer_set" -eq 0 ] && [ "$platform_set" -eq 0 ] ||
+        fail '--command cannot change renderer or platform'
+    case "$command" in
+        open)
+            [ "$url_set" -eq 1 ] ||
+                fail '--command open requires explicit --url' ;;
+        back|forward|reload|stop|uri)
+            [ "$url_set" -eq 0 ] ||
+                fail '--url is only accepted with --command open' ;;
+        *) fail 'invalid command (open|back|forward|reload|stop|uri)' ;;
+    esac
+fi
 # A URL is an argument to our native engine, never a command or option.
 # Reject controls, whitespace, and URLs without an absolute http(s) origin.
 # grep operates line-wise; reject embedded newlines before the regexp gate.
@@ -105,6 +133,15 @@ for binary in "$core" "$wpe"; do
         fail "NEON attribute forbidden: $binary"
     fi
 done
+
+if [ -n "$command" ]; then
+    # The existing native ELF speaks to the same-UID 0600 AF_UNIX socket.
+    # Do not create a second public executable or start a second WebView.
+    case "$command" in
+        open) exec "$core" --remote open "$url" ;;
+        *) exec "$core" --remote "$command" ;;
+    esac
+fi
 
 case "$platform" in
     headless) ;;

@@ -34,7 +34,33 @@ the pinned Grate Mesa prefix is explicit opt-in. WebKit sandboxing and CPU
 Tegra2 no-NEON ABI are non-negotiable. A successful compile is **not** device
 or GPU qualification.
 
-**User's device .106 is still unreachable following RC2 kexec.** Do not
-SSH, reboot, install, or modify either SL101 tablet during this batch.
-All four workers must implement and test against repository artifacts/host.
-Do not touch the dirty Mesa patch series or unrelated uncommitted files.
+**Historical 2026-11-10 worker restriction:** .106 was unreachable following
+RC2 kexec; that four-worker batch was host-only. As of 2026-11-11 the device
+is reachable, but this new browser is still NOT authorized for deployment:
+its Debian ARMHF WPE 2.54 dependency closure has unresolved Tegra2 ISA risks.
+Preserve unrelated Mesa, boot, and session state.
+
+## Native browser navigation (2026-11-11, host-tested)
+
+The single public command (,browse) now supports remote navigation of an
+existing WPE WebView through private AF_UNIX JSONL control IPC. It uses
+the SAME compiled nurabrowser-core executable, not a second browser or
+a public alias:
+
+    ,browse --command uri
+    ,browse --command back
+    ,browse --command forward
+    ,browse --command reload
+    ,browse --command stop
+    ,browse --command open --url https://example.org/
+
+This requires the prepared private ARMHF root, the browser's same numeric
+UID, a private 0700 runtime directory and a 0600 socket. The client checks
+kernel peer credentials, frame limits, and I/O timeouts; the navigation
+engine remains the URL validation authority. JSON output is suitable for
+future NuraLoumi touch/keyboard controls. Host-only tests:
+
+    sh nura-browser/tests/run-remote-host.sh
+
+See docs/remote-control-20261111.md. The WPE 2.54 ARMHF runtime closure
+still has unresolved Tegra2 NEON/VFPv4 risks and is NOT device-qualified.
