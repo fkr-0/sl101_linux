@@ -35,8 +35,10 @@ and exit successfully, with sandbox enabled. Otherwise it fails.
 
 2026-11-11 23:25 CET: Device .106 responded to ICMP, but normal
 public-key SSH authentication from the current controller shell failed.
-Its SSH server recognized the configured RSA public key, but no unlocked
-agent was available to complete authentication. An unrelated existing
+Its SSH server recognized the configured RSA public key. The controller
+shell lacked SSH_AUTH_SOCK; the configured user SSH agent was found
+but did not complete an authenticated connection within the bounded
+attempt. An unrelated existing
 SSH ControlMaster was identified as a Git transport connection and
 was deliberately not reused. No legitimate tablet command could be
 executed in this session. **Device headless and Wayland qualification
@@ -49,3 +51,13 @@ both fresh device identity checks and an authenticated, approved
 test session. Do not work around the SSH-agent or namespace security
 boundary. Once headless succeeds, a separately gated software Sway
 Wayland + WayVNC pixel/input test can be run without altering Cog.
+
+## Debian CI snapshot correction
+
+The first NuraBrowser CI release run 43032042301 succeeded. On the
+later push, run 43113227008 failed while resolving Debian ARMHF apt
+dependencies: rolling unstable changed the Perl ABI even though WPE
+2.54 .deb files were pinned. The CI Dockerfile now pins the SIGNED
+Debian 2026-11-04 package-index snapshot for all extra build dependencies
+in addition to its digest-pinned Debian base image. This is independent
+of the currently blocked device SSH and sandbox qualification.

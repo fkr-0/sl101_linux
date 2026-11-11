@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/verify-ci-release.py"
+CI_DOCKERFILE = Path(__file__).resolve().parents[1] / "packaging/Dockerfile.ci-armhf"
 spec = importlib.util.spec_from_file_location("browser_verify_ci", SCRIPT)
 verify_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(verify_module)
@@ -146,6 +147,15 @@ class CiReleaseVerifierTest(unittest.TestCase):
         (self.out / "unknown.exe").write_bytes(b"untrusted")
         with self.assertRaisesRegex(ValueError, "evidence file set"):
             self.verify()
+
+
+class CiBuildInputsTest(unittest.TestCase):
+    def test_full_debian_closure_uses_dated_signed_snapshot(self):
+        dockerfile = CI_DOCKERFILE.read_text()
+        self.assertIn("snapshot.debian.org/archive/debian/20261104T212339Z", dockerfile)
+        self.assertIn("Check-Valid-Until: no", dockerfile)
+        self.assertIn("FROM debian@sha256:", dockerfile)
+        self.assertNotIn("FROM debian:unstable", dockerfile)
 
 
 if __name__ == "__main__":

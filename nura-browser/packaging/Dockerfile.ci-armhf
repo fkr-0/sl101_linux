@@ -3,7 +3,15 @@
 FROM debian@sha256:873bf43b48d52ba792b98de93232153e59d4946b93cbd89d91cffef0df4ce823
 
 ARG DEBIAN_FRONTEND=noninteractive
-RUN dpkg --add-architecture armhf \
+# Pin the signed Debian package index as well as the base-image digest:
+# rolling unstable changed Perl ABIs and broke the second CI run.
+RUN sed -i \
+      's#http://deb.debian.org/debian#http://snapshot.debian.org/archive/debian/20261104T212339Z#g' \
+      /etc/apt/sources.list.d/debian.sources \
+    && printf 'Check-Valid-Until: no\n' >> /etc/apt/sources.list.d/debian.sources \
+    && grep -Fq 'URIs: http://snapshot.debian.org/archive/debian/20261104T212339Z' \
+       /etc/apt/sources.list.d/debian.sources \
+    && dpkg --add-architecture armhf \
     && apt-get -o Acquire::Retries=3 update \
     && apt-get install -y --no-install-recommends \
        ca-certificates python3 python3-yaml \
