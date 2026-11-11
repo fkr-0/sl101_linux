@@ -164,3 +164,24 @@ This is an **installed, CI-provenanced inactive release**, NOT a
 fully activated NuraLoumi browser. The native WPEPlatform WebProcess,
 sandbox, Wayland pixels and keyboard/touch need a separately gated
 on-device qualification before enabling the public command.
+
+### Separate repository-wide GitHub CI caveat
+
+The dedicated NuraBrowser WPE 2.54 ARMHF release workflow run 43032042301
+COMPLETED SUCCESSFULLY and generated the verified production-candidate
+artifact used above.
+
+The separate, generic repository-wide CI workflow run 43032041614 on
+the same source commit FAILED in Unit tests: 354 tests were run,
+4 failures, 16 errors, 40 skipped. Failure examples include test
+fixtures referring to Git-ignored work/sl101-dmafix1-vde-rc2-20261110
+kernel artifacts and build/mesa-grate-clean source files not present in
+a clean GitHub checkout. Those are other project test dependencies,
+not an ARMHF NuraBrowser compiler/linker or artifact failure.
+
+The local full repository test suite did pass (2147 tests, 3 skipped)
+because the local machine retains these ignored hardware/source
+fixtures. Do not represent the generic GitHub CI as green, silently
+remove those tests, or infer clean-checkout reproducibility from the
+local result. Repair the baseline/general CI artifact fixture strategy
+as a distinct, scoped change.
