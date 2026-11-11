@@ -98,3 +98,69 @@ install the public ,browse integration and associated runtime mounts.
 Record actual GitHub source SHA, run ID, artifact SHA256, read-only
 Ansible --check recap, inactive stage recap, remote executable hashes,
 kernel boot ID and untouched Cog/Sway state here after verification.
+
+### 2026-11-11 verified GitHub Actions artifact
+
+| Evidence | Verified value |
+| --- | --- |
+| GitHub Actions run | 43032042301, completed SUCCESS |
+| Source SHA | e0c2b0424c1244596bd0b2e9f40dd1ae54e968ac |
+| Workflow | .github/workflows/nura-browser-armhf.yml |
+| Branch | nurabrowser-ci-20261111 |
+| Original CI tar SHA256 | a15c922ac9e8e49a499e4b128c42cadbfb4ce96f5e44d2ecf2acc1dc8259920a |
+| CI-built ARMHF core SHA256 | 67b5a5d6961ccb4ee100e40a6cb8300571e6a986978fd20e2fd20381a2e3a06b |
+| CI-built launcher SHA256 | c5ef1b3422dbc68949fe58b4d23dce49a5f0f400c405c3e78ddb85b66300b5e4 |
+| Static status | CI-STATIC-READY-RUNTIME-UNQUALIFIED |
+
+This artifact was downloaded from its exact GitHub run, and the CI-only
+importer verified its complete contents, source, hashes and ARMHF ABI
+before publishing to the ignored controller data directory. This is
+**not** the previously built host-local ARMHF binary.
+
+Read-only physical device check before staging:
+kernel 7.0.1-postmarketos-grate-dmavde1,
+boot ID 48d4a72f-146f-43c7-a308-496466246821,
+hostname sl101-nura, both storage CIDs and SD root matched inventory.
+
+### Actual CI-only Ansible staging result on .106
+
+The complete controller/device read-only preflight PASSED:
+
+    ok=11 changed=0 unreachable=0 failed=0 skipped=9
+
+The explicitly gated Ansible stage PASSED:
+
+    ok=20 changed=6 unreachable=0 failed=0 skipped=0
+
+An immediate second full staged Ansible run was IDEMPOTENT:
+
+    ok=20 changed=0 unreachable=0 failed=0 skipped=0
+
+Installed, inactive release:
+
+    /opt/nura-browser/releases/e0c2b0424c1244596bd0b2e9f40dd1ae54e968ac/
+      nurabrowser-ci.tar
+      BIN-SHA256SUMS.txt
+      CI-GITHUB-RUN.json
+      CI-STAGED
+      release/bin/nurabrowser-core
+      release/bin/,browse
+      release/CI-PROVENANCE.json
+      release/nurabrowser-artifacts.json
+
+Independent postflight over SSH verified:
+
+- Original CI tar SHA256 remains
+  a15c922ac9e8e49a499e4b128c42cadbfb4ce96f5e44d2ecf2acc1dc8259920a.
+- Both executable files passed a fresh remote sha256sum -c check.
+- ARM ELF32 EABI5 hard-float binary and ld-linux-armhf.so.3 interpreter.
+  Executables and release directories are root-owned.
+- CI-STAGED explicitly contains RUNTIME_QUALIFIED=false and
+  ACTIVATED=false. No global ,browse alias and no current symlink.
+- Physical kernel/boot ID, Sway, WayVNC, NuraLoumi panel were
+  preserved; no Cog/NuraBrowser test process was left running.
+
+This is an **installed, CI-provenanced inactive release**, NOT a
+fully activated NuraLoumi browser. The native WPEPlatform WebProcess,
+sandbox, Wayland pixels and keyboard/touch need a separately gated
+on-device qualification before enabling the public command.
