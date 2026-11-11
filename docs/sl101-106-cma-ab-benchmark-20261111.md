@@ -1,6 +1,6 @@
 # SL101 .106 — CMA vs minus-CMA: physical benchmark gate
 
-Date: 2026-11-11. **No promotion to Debian .100 before this A-B-A gate.**
+Date: 2026-11-11. **Latest physical state:** .106 runs minus-CMA after a verified normal reboot; .100 still runs stock because its battery actively discharges at 22% despite AC online. The user explicitly authorized a test deployment to .100, but durable production promotion and the CMA performance verdict still require A-B-A qualification. See docs/sl101-106-minus-cma-deployment-20261111.md and docs/sl101-100-cma-staged-low-battery-20261111.md.
 
 ## Two independently built benchmark kernels
 
@@ -12,8 +12,7 @@ Date: 2026-11-11. **No promotion to Debian .100 before this A-B-A gate.**
 The already-completed host A/B gate proved that the source trees differ
 only in arch/arm/mm/dma-mapping.c by the CMA remap patch. The kernel
 configurations are otherwise identical apart from LOCALVERSION; both
-have the same SL101 DTB and 587 matching module paths. **B is NOT yet
-booted on .106; do not claim benchmark results for it.**
+have the same SL101 DTB and 587 matching module paths. **B is now successfully booted on .106** (boot ID 2459039c-a4d8-4cdb-9128-dd3b3061f771) with 587 modules, Sway/NuraLoumi/WayVNC and bounded VDE decoder smoke verified. This does not complete the long A-B-A performance gate.
 
 ## Actual hardware qualification of A on .106
 
@@ -65,6 +64,10 @@ A separately verified kernel-function kprobe was used for a brief
 probe only, but the reproducible benchmark script intentionally uses
 private CMA tracepoints and non-invasive end-to-end timing.
 
+## B-side five-run smoke after actual deployment
+
+The new minus-CMA kernel B was independently flashed and normally rebooted. Its pinned five-run 96-frame VDE decode test recorded 170 matched CMA allocations, zero failures, pipeline p50 **902.762 ms** (p95 **912.595 ms**) and CMA core-allocation p50 **289.5 microseconds** (p95 **734.85 microseconds**). Same clip as A five-run smoke. These **five observations per kernel cannot support a performance verdict**: thermal and fragmentation drift remain unbalanced. Physical JSON: work/sl101-106-dmavde1-minus-cma-deploy-20261111/cma-B-five-run-smoke.json.
+
 ## Reproducible A-B-A qualification
 
 Scripts:
@@ -82,14 +85,9 @@ parameter, global tracer, and display alone.
 
 The required sequence is:
 
-1. **A1**: existing .106 full-CMA kernel; 60 or more measured runs.
-2. **B**: after an explicitly backed-up and read-back-verified exact
-   8-MiB .106 LNX kernel swap plus its own complete matching module
-   directory, normal reboot into the minus-CMA release, then 60 or
-   more identical measured runs. Re-run GPU first-use/pixel and
-   bit-exact H.264 checks to exclude correctness regressions.
-3. **A2**: restore A's exact LNX, normal reboot with recovery confirmed,
-   then an equivalent measurement phase to check thermal/time drift.
+1. **A1**: switch back to the saved exact four-patch CMA LNX after validating the original backup and restoring via the guarded device-specific boot path; normal reboot and 60 or more runs. The historical A smoke has only five runs and does not qualify as A1.
+2. **B**: switch again to the independently verified minus-CMA LNX, normal reboot and 60 or more identical runs. B is *currently running*, but only the five-run smoke exists; repeat the full GPU first-use and software-reference VDE checks on B to exclude correctness regressions.
+3. **A2**: restore the exact CMA LNX again, normal reboot with recovery available, and measure the third phase to check drift.
 
 All three phases must have **different confirmed boot IDs**.
 A2 must be the exact same zImage, DTB, module set and corpus as A1.
@@ -121,14 +119,11 @@ CMA median pipeline overhead, 10% p95 overhead or 20% p99 overhead
 as a performance regression. These are operational thresholds,
 not formal proofs of memory safety or perfect latency.
 
-The automatic extended measurement was **not completed on this turn**;
-the device-side five-run smoke proved only the measurement mechanism.
-No minus-CMA flash, benchmark reboot or change to .100 occurred.
-The promotion gate is **RED / A-B-A NOT MEASURED**.
+The extended A1-B-A2 measurement remains **NOT MEASURED**. The B kernel was flashed, normally rebooted and five-run smoke tested successfully. A was five-run smoke tested earlier. Neither smoke qualifies as a full phase. On .100 the four-patch kernel and 587 modules are staged on SD, but eMMC LNX was NOT modified and the device was NOT rebooted because its battery is discharging at 22%. The performance promotion gate remains **RED / A-B-A NOT MEASURED**.
 
 ## Release gates before .100
 
-Do not flash Debian .100 until:
+Do not declare the Debian .100 four-patch kernel a fully qualified production promotion until:
 - A-B-A performance gate is measured and acceptable;
 - A and B graphics + VDE correctness evidence is complete, with no
   new DMA/VDE faults, and .106 is restored to intended A state;
@@ -137,6 +132,4 @@ Do not flash Debian .100 until:
 - the full repository test suite or relevant release gate failures
   are resolved or explicitly accepted by the operator.
 
-**Current verdict:** the four-patch A kernel is functionally good
-on .106. No defensible performance comparison with minus-CMA exists
-yet, so an automatic production promotion to .100 would be premature.
+**Current verdict:** four-patch A passed 216/216 GPU, 120/120 sampler and 96-frame VDE/FFmpeg bit-accuracy functional tests on .106; minus-CMA B is now physically running on .106 and passed boot/service plus 5-run VDE smoke. No defensible performance parity conclusion exists. An authorized .100 test deployment was prepared but intentionally stopped before its eMMC flash because power is actively discharging despite AC indicated.

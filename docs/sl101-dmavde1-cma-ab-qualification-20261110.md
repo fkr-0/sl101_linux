@@ -1,10 +1,6 @@
 # SL101 7.0.1: CMA A/B release-candidate pair
 
-**Built:** 2026-11-10. **Live update:** 2026-11-11: full four-patch RC
-flashed to .106, normal reboot and service availability verified.
-The independent minus-CMA benchmark remains host-only and **was not
-installed**. Source isolation and host A/B comparison remain valid.
-See docs/sl101-106-dmavde1-flash-20261111.md.
+**Built:** 2026-11-10. **Live update:** 2026-11-11: four-patch CMA RC first flashed, booted and functionally qualified on .106; then the minus-CMA three-patch benchmark was deliberately flashed on .106, independently read back and successfully booted. Debian .100 is still on stock: full CMA modules and image staged, but eMMC flash blocked by battery actively discharging at 22% despite AC online. See docs/sl101-106-dmavde1-flash-20261111.md, docs/sl101-106-minus-cma-deployment-20261111.md and docs/sl101-100-cma-staged-low-battery-20261111.md. The complete three-boot A1-B-A2 performance gate remains **OPEN**.
 
 ## Artifact identities
 
@@ -107,7 +103,7 @@ module paths and **identical DTB SHA-256**:
 | Portable archive SHA-256 | `d7781381ee52efb3be6edf885857b2800a4e1e00ce989a63a00955035183d8dc` | `774931dae8224afb78bd2f38272bcfbe6496f3b8db86b600fb26d81f208e4c3d` |
 | Full module inventory | 587 | 587 |
 | Patch count | 4 | 3 (CMA excluded) |
-| Kernel and hardware status | **.106 flashed: exact four-patch RC normal boot verified; no graphics/CMA performance verdict** | Built; **not installed or boot-tested** |
+| Kernel and hardware status | Previously booted and GPU/VDE qualified on .106; **staged on .100, not flashed due to low/discharging battery** | **Currently running on .106**; eMMC LNX readback and new boot ID verified, 587 modules, Sway/NuraLoumi/WayVNC; 5-decode smoke, not full A-B-A verdict |
 
 The benchmark archive is:
 
@@ -140,7 +136,9 @@ are separately qualified: **.100 has ASUS LNX/eMMC and Debian/microSD
 root; .106 has an experimentally confirmed active eMMC Android-header
 LNX kernel container with Nura/microSD root** (the precise first-stage
 bootloader identity remains distinct/uncertain). The .106 full four-patch
-RC has booted once; minus-CMA has not been deployed. Do NOT execute
+RC booted successfully and was then replaced by the **running minus-CMA**
+benchmark kernel. The .100 four-patch release is staged but has not
+been flashed because the battery is discharging at 22%. Do NOT execute
 blind `kexec`, take over the live Sway DRM master, or treat SD
 `/boot/extlinux.conf` as the normal eMMC boot selector.
 

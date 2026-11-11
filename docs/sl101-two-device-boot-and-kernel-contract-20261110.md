@@ -1,6 +1,6 @@
 # SL101 — Two physical boot chains, ONE shared DMA+VDE production kernel
 
-Initial mapping: 2026-11-10. **Live .106 flash/reboot update: 2026-11-11**. This is the canonical operator/device mapping; see docs/sl101-106-dmavde1-flash-20261111.md for the actual eMMC LNX write, backups and successful boot.
+Initial mapping: 2026-11-10. **Live status updated 2026-11-11**: .106 successfully booted the four-patch CMA kernel first, then was deliberately flashed to the minus-CMA benchmark control and successfully rebooted again. .100 remains on stock because its battery is actively discharging despite AC detected; the four-patch CMA target and matching modules are staged on its SD. See docs/sl101-106-minus-cma-deployment-20261111.md and docs/sl101-100-cma-staged-low-battery-20261111.md.
 The prior inference that the Nura device always returns to the ASUS stock
 bootloader after a cold reboot is **unproven and must not be used to plan
 deployment or recovery**.
@@ -16,7 +16,7 @@ deployment or recovery**.
 | Internal eMMC | mmcblk0; CID 7001004d4d43333247447e682c336e00 | mmcblk0; CID 7001004d4d43333247448d402a656e00 |
 | External microSD | mmcblk1; CID 03534453553332478030be3f6400b900 | mmcblk1; CID 035344534c31323880ac79a543010300 |
 | Running Linux root | microSD /dev/mmcblk1p1 (ext4) | microSD /dev/mmcblk1p1 (ext4) |
-| Running kernel (2026-11-11) | 7.0.1-postmarketos-grate (stock) | **7.0.1-postmarketos-grate-dmavde1 (four-patch RC), authenticated after reboot** |
+| Running kernel (2026-11-11 latest) | **7.0.1-postmarketos-grate (stock; CMA modules staged, LNX unmodified due to discharging 22% battery)** | **7.0.1-postmarketos-grate-dmavde1-minus-cma (3-patch benchmark control; authenticated new boot ID 2459039c-a4d8-4cdb-9128-dd3b3061f771)** |
 | SD /boot/extlinux default | Debian-EC-current | **sl101-stock-rescue** (recovery, NOT controlling normal eMMC-LNX boot) |
 
 Important: U-Boot or ASUS bootloader **on eMMC** is not the same as the
@@ -71,10 +71,12 @@ SD /boot/extlinux.conf is not by itself proof of what ASUS LNX boots.
 
 ## Target release: ONE kernel source + modules, TWO boot packages
 
-Decision: both tablets must receive the SAME productive 7.0.1-r4-derived
-kernel image and matching 587-module ABI tree. The different libc/OS
-does not require a different kernel. Exact board-compatible DTBs and boot
-containers still need individual verification.
+Long-term decision: both tablets should use the SAME productive 7.0.1-r4-derived
+kernel image and matching 587-module ABI tree. During the explicit CMA
+benchmark experiment, .106 temporarily runs the separate minus-CMA control,
+while .100 is still on stock due to its actively discharging 22% battery.
+The different libc/OS does not require a different kernel. Exact
+board-compatible DTBs and boot containers need individual verification.
 
 Two **required fixes** were demonstrated/implemented:
 
