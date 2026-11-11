@@ -1,5 +1,15 @@
 # NuraBrowser ARMHF ISA audit — follow-up review and corrections
 
+**2026-11-11 follow-up:** physical device .106 runs Cog against the same
+WPE WebKit 2.54.0-2 ELF as the NuraBrowser cross-build, with a working
+no-SIMD libwebp/libsharpyuv override. The seven findings below were
+static suspects and are NOT seven proven reachable SIGILL faults.
+No-NEON Cortex-A9 QEMU probes pass for selected libm functions, libgcrypt
+SHA-256 and library initialization. See the newer evidence and
+remaining hardware/sandbox gates in
+wpe254-tegra2-runtime-investigation-20261111.md. The historical strict
+audit below remains correctly BLOCKED as a universal ISA guarantee.
+
 Date: 2026-11-10; repository: sl101_linux. Host-only. No SL101 tablet accessed.
 
 ## Outcome

@@ -6,6 +6,15 @@ eventually be `,browse`. Implement the browser in isolated C modules and
 make the project's existing Cog/browser launcher available only as an
 internal diagnostic reference (no permanent dual user-facing aliases).
 
+**Runtime clarification (2026-11-11):** the installed Cog on SL101 .106
+already uses WPE WebKit 2.54.0-2, the same exact WebKit shared-library
+bytes used by our ARMHF NuraBrowser build. Cog differs by using the legacy
+libwpe backend, not an older engine. The confirmed Tegra2 WebP SIGILL is
+worked around by the existing private no-SIMD overlay; six other static
+ISA-suspect libraries do NOT automatically require six rebuilds.
+Repeatable no-NEON QEMU probes and a safe isolated-runtime qualification
+plan are in docs/wpe254-tegra2-runtime-investigation-20261111.md.
+
 ## Source ownership and integration contract
 
 - `include/nurabrowser/contract.h` — **coordinator-owned**, immutable
@@ -63,4 +72,6 @@ future NuraLoumi touch/keyboard controls. Host-only tests:
     sh nura-browser/tests/run-remote-host.sh
 
 See docs/remote-control-20261111.md. The WPE 2.54 ARMHF runtime closure
-still has unresolved Tegra2 NEON/VFPv4 risks and is NOT device-qualified.
+has selected remaining Tegra2 NEON/VFPv4 reachability and sandbox tests;
+the NEW WPEPlatform frontend is NOT yet device-qualified. See the
+2026-11-11 runtime investigation before proposing library rebuilds.
