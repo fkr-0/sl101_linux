@@ -102,7 +102,7 @@ outside Git:
 Result SHA-256: c958665afea2b3e3b7aa7b2f1bdd5e3f481b52c45940696fc939ec8789d6e11f.
 
 The battery was 88% before and immediately after the 60 runs
-(87% at later audit), CPU frequency **760 MHz at start, 1000 MHz at
+(87% at later audit), **AC=0 both before and after this 60-run test**, CPU frequency **760 MHz at start, 1000 MHz at
 finish** with ondemand governor, and temperature 27→29 °C. The first
 15 decodes averaged 955.323 ms; the last 15 averaged 1031.829 ms.
 **Time/frequency drift and unplugged power make this a diagnostic,
@@ -120,12 +120,16 @@ PASS or REGRESSION.
 
 
 
-A pinned 96-frame H.264 decoder run was repeated 5 times under the
-minus-CMA kernel. **170 matched CMA allocation events**, zero failures.
+The **first** B-side 96-frame H.264 decoder test was repeated five
+ times **ON AC POWER (AC=1 at start and finish; battery 99%)**, not
+ on battery. This has been independently confirmed from the original
+ measurement JSON. **170 matched CMA allocation events**, zero failures.
 
 - VDE pipeline p50 902.762 ms; p95 912.595 ms; p99 913.789 ms.
 - Underlying CMA page allocation p50 289.5 microseconds; p95 734.85.
-- Same clip as the earlier A-side five-run smoke (A p50 879.381 ms).
+- Same clip as the earlier A-side **also AC-powered** five-run smoke
+  (A p50 879.381 ms). Minus-CMA B p50 was 2.7% higher than CMA A
+  for just five runs; not a robust result.
 - Private JSON: work/sl101-106-dmavde1-minus-cma-deploy-20261111/cma-B-five-run-smoke.json.
 - Source: scripts/sl101-dmavde-cma-ab-bench.py.
 

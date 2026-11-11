@@ -90,11 +90,25 @@ class ABABenchmarkTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "battery diagnostic"):
             CMP.compare(a, b, a2)
 
+    def test_device_selection_pins_both_sl101_physically(self):
+        self.assertEqual(BENCH.TARGETS["debian"]["hostname"], "sltwrpbootdebian")
+        self.assertEqual(BENCH.TARGETS["debian"]["sd_cid"],
+                         "03534453553332478030be3f6400b900")
+        self.assertEqual(BENCH.TARGETS["debian"]["emmc_cid"],
+                         "7001004d4d43333247447e682c336e00")
+        self.assertFalse(BENCH.TARGETS["debian"]["requires_sway"])
+        self.assertTrue(BENCH.TARGETS["nura"]["requires_sway"])
+        self.assertNotEqual(BENCH.TARGETS["debian"]["sd_cid"],
+                            BENCH.TARGETS["nura"]["sd_cid"])
+        self.assertNotEqual(BENCH.TARGETS["debian"]["emmc_cid"],
+                            BENCH.TARGETS["nura"]["emmc_cid"])
+
     def test_bench_cli_help_is_valid_on_python314(self):
         cmd = [sys.executable, str(ROOT / "scripts/sl101-dmavde-cma-ab-bench.py"), "--help"]
         result = subprocess.run(cmd, text=True, capture_output=True, timeout=8)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--power-profile", result.stdout)
+        self.assertIn("--device {debian,nura}", result.stdout)
 
     def test_valid_aba_performance_pass(self):
         report = CMP.compare(*sequence())

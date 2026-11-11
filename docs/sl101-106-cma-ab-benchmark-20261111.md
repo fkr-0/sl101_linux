@@ -52,8 +52,8 @@ A five-repetition **instrumentation smoke test**, not a valid A/B:
 - A kernel: 7.0.1-postmarketos-grate-dmavde1
 - VDE pipeline median: **879.381 ms**, p95 **947.693 ms**
 - CMA core allocation: 170 events, median **1007 μs**, p95 **3042.6 μs**
-- Zero CMA allocation failures, CPU start/end 1000 MHz,
-  temperature from 28C to 29C.
+- **AC=1 both at start and finish**, battery 99%; zero CMA allocation
+  failures, CPU start/end 1000 MHz, temperature from 28C to 29C.
 - Raw evidence (Git-ignored, host):
   work/sl101-106-dmavde1-hwqual-20261111/cma-A-smoke-result.json
 
@@ -66,7 +66,7 @@ private CMA tracepoints and non-invasive end-to-end timing.
 
 ## B-side five-run smoke after actual deployment
 
-The new minus-CMA kernel B was independently flashed and normally rebooted. Its pinned five-run 96-frame VDE decode test recorded 170 matched CMA allocations, zero failures, pipeline p50 **902.762 ms** (p95 **912.595 ms**) and CMA core-allocation p50 **289.5 microseconds** (p95 **734.85 microseconds**). Same clip as A five-run smoke. These **five observations per kernel cannot support a performance verdict**: thermal and fragmentation drift remain unbalanced. Physical JSON: work/sl101-106-dmavde1-minus-cma-deploy-20261111/cma-B-five-run-smoke.json.
+The new minus-CMA kernel B was independently flashed and normally rebooted. Its pinned five-run 96-frame VDE decode test recorded 170 matched CMA allocations, zero failures, pipeline p50 **902.762 ms** (p95 **912.595 ms**) and CMA core-allocation p50 **289.5 microseconds** (p95 **734.85 microseconds**). **AC=1 at both start and finish**, battery 99% (CPU 912→1000MHz), same physical .106 tablet, same clip as the earlier A AC-powered five-run smoke (CPU 1000→1000MHz). A p50 was 879.381ms: B's five-sample p50 was approximately 2.7% slower, but **five observations per kernel cannot support a reliable performance ranking**; boot, thermal, CPU-frequency and fragmentation drift remain. Physical JSON: work/sl101-106-dmavde1-minus-cma-deploy-20261111/cma-B-five-run-smoke.json.
 
 ## Reproducible A-B-A qualification
 
@@ -119,7 +119,7 @@ CMA median pipeline overhead, 10% p95 overhead or 20% p99 overhead
 as a performance regression. These are operational thresholds,
 not formal proofs of memory safety or perfect latency.
 
-The extended A1-B-A2 measurement remains **NOT MEASURED**. The B kernel was flashed, normally rebooted and five-run smoke tested successfully. A was five-run smoke tested earlier. Neither smoke qualifies as a full phase. On .100 the four-patch kernel and 587 modules are staged on SD, but eMMC LNX was NOT modified and the device was NOT rebooted because its battery is discharging at 22%. The performance promotion gate remains **RED / A-B-A NOT MEASURED**.
+The extended same-device A1-B-A2 measurement remains **NOT MEASURED**. On .106 both original A and B five-run smokes were AC-powered, but only five runs each; its later 60-run B diagnostic was on battery. On Debian .100, the four-patch CMA kernel was successfully flashed and rebooted, with a separate **60-run AC-powered VDE/CMA benchmark** (60/60, 2040 allocation events, p50 1468.307ms), documented at docs/sl101-100-cma-vde-benchmark-20261111.md. That run uses different device and userspace, so it cannot substitute for same-device CMA A1. The performance promotion gate remains **RED / A-B-A NOT MEASURED**.
 
 ## Release gates before .100
 
@@ -132,4 +132,4 @@ Do not declare the Debian .100 four-patch kernel a fully qualified production pr
 - the full repository test suite or relevant release gate failures
   are resolved or explicitly accepted by the operator.
 
-**Current verdict:** four-patch A passed 216/216 GPU, 120/120 sampler and 96-frame VDE/FFmpeg bit-accuracy functional tests on .106; minus-CMA B is now physically running on .106 and passed boot/service plus 5-run VDE smoke. No defensible performance parity conclusion exists. An authorized .100 test deployment was prepared but intentionally stopped before its eMMC flash because power is actively discharging despite AC indicated.
+**Current verdict:** four-patch A passed 216/216 GPU, 120/120 sampler and 96-frame VDE/FFmpeg bit-accuracy functional tests on .106; minus-CMA B currently runs on .106 with verified boot/services, 5-run AC smoke and 60-run battery diagnostic. Four-patch CMA A is independently boot-confirmed on Debian .100 and its 60-run AC benchmark completed without CMA failures. **Cross-device, cross-userspace and mixed-power runs are not CMA A/B parity evidence**; a valid matched same-device 60+ A1-B-A2 gate remains open.

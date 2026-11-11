@@ -35,8 +35,23 @@ KERNELS = {
         "vde_sha": "be44097b3fe220fa8083abb7cf7dbbcea396ce28d41e8c15199617b15aecc24b",
     },
 }
-SD_CID = "035344534c31323880ac79a543010300"
-EMMC_CID = "7001004d4d43333247448d402a656e00"
+TARGETS = {
+    "nura": {
+        "hostname": "sl101-nura",
+        "sd_cid": "035344534c31323880ac79a543010300",
+        "emmc_cid": "7001004d4d43333247448d402a656e00",
+        "requires_sway": True,
+    },
+    "debian": {
+        "hostname": "sltwrpbootdebian",
+        "sd_cid": "03534453553332478030be3f6400b900",
+        "emmc_cid": "7001004d4d43333247447e682c336e00",
+        "requires_sway": False,
+    },
+}
+# Keep historical module-level constants for callers explicitly testing Nura.
+SD_CID = TARGETS["nura"]["sd_cid"]
+EMMC_CID = TARGETS["nura"]["emmc_cid"]
 BASE = Path("/root/hwrun/qa-dmavde1")
 CLIP = BASE / "vde-qual/short.mp4"
 TRACE = Path("/sys/kernel/tracing")
@@ -241,14 +256,17 @@ def run(args: argparse.Namespace) -> dict:
     config = KERNELS[args.variant]
     if os.geteuid():
         raise RuntimeError("requires root for private tracefs instance")
-    if socket.gethostname() != "sl101-nura":
-        raise RuntimeError("wrong physical tablet hostname")
+    target = TARGETS[args.device]
+    if socket.gethostname() != target["hostname"]:
+        raise RuntimeError(f"wrong physical tablet hostname for {args.device}")
+    if args.device == "debian" and args.variant != "cma":
+        raise RuntimeError("Debian .100 benchmark only accepts the installed CMA kernel")
     uname = os.uname().release
     if uname != config["release"]:
         raise RuntimeError("wrong ABI/release, got " + uname)
-    if read(Path("/sys/block/mmcblk1/device/cid")) != SD_CID:
+    if read(Path("/sys/block/mmcblk1/device/cid")) != target["sd_cid"]:
         raise RuntimeError("wrong SD physical CID")
-    if read(Path("/sys/block/mmcblk0/device/cid")) != EMMC_CID:
+    if read(Path("/sys/block/mmcblk0/device/cid")) != target["emmc_cid"]:
         raise RuntimeError("wrong eMMC physical CID")
     if read(Path("/sys/module/tegra_vde/parameters/cached_capture")) != "N":
         raise RuntimeError("VDE cached_capture not at baseline N")
@@ -267,9 +285,11 @@ def run(args: argparse.Namespace) -> dict:
     if not dest.parent.is_dir():
         raise FileNotFoundError("output parent must be created in advance")
     sway_proc = subprocess.run(["pgrep", "-xo", "sl101-sway"], capture_output=True, text=True)
-    if sway_proc.returncode:
-        raise RuntimeError("Sway supervisor not running; refuse")
-    sway_pid = sway_proc.stdout.strip()
+    if target["requires_sway"] and sway_proc.returncode:
+        raise RuntimeError("Nura Sway supervisor not running; refuse")
+    # Debian RootBind may use an independent desktop or no compositor.
+    # Observe any Sway PID if present, without requiring one.
+    sway_pid = sway_proc.stdout.strip() if not sway_proc.returncode else None
     vm_before = health()
     validate_power_profile(vm_before, args.power_profile)
     # Prewarm dynamic libraries/firmware in the same mode, not included in measurements.
@@ -305,8 +325,9 @@ def run(args: argparse.Namespace) -> dict:
     if vm_after["boot_id"] != vm_before["boot_id"]:
         raise RuntimeError("boot ID changed during benchmark")
     after_sway = subprocess.run(["pgrep", "-xo", "sl101-sway"], capture_output=True, text=True)
-    if after_sway.stdout.strip() != sway_pid:
-        raise RuntimeError("Sway changed PID during benchmark")
+    after_sway_pid = after_sway.stdout.strip() if not after_sway.returncode else None
+    if after_sway_pid != sway_pid:
+        raise RuntimeError("Sway presence/PID changed during benchmark")
     deltas = {k: v - vm_before["vmstat"].get(k, 0) for k, v in vm_after["vmstat"].items()}
     if deltas.get("cma_alloc_fail", 0) or trace["errors"]:
         raise RuntimeError("kernel CMA allocation failed")
@@ -315,6 +336,9 @@ def run(args: argparse.Namespace) -> dict:
     result = {
         "schema": "sl101-cma-ab-hardware-v1",
         "variant": args.variant,
+        "device": args.device,
+        "physical_sd_cid": target["sd_cid"],
+        "physical_emmc_cid": target["emmc_cid"],
         "power_profile": args.power_profile,
         "release": uname,
         "boot_id": vm_before["boot_id"],
@@ -347,6 +371,7 @@ def run(args: argparse.Namespace) -> dict:
         indent=2) + "\n")
     print(json.dumps({
         "result": str(dest / "result.json"),
+        "device": args.device,
         "variant": args.variant,
         "repeats": args.repeats,
         "core_cma_us": trace["core_cma_us"],
@@ -359,6 +384,8 @@ def run(args: argparse.Namespace) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--variant", choices=sorted(KERNELS), required=True)
+    parser.add_argument("--device", choices=sorted(TARGETS), default="nura",
+                        help="strictly pin target physical tablet identity and desktop policy")
     parser.add_argument("--repeats", type=int, default=60)
     parser.add_argument("--power-profile", choices=("ac", "battery"), default="ac",
                         help="AC required by default; battery allows standalone diagnostics only at >=80%%")
