@@ -108,8 +108,18 @@ class NuraCiAnsibleTests(unittest.TestCase):
             preview = subprocess.run(base + ["--check"], capture_output=True, text=True)
             self.assertEqual(preview.returncode, 0, preview.stdout + preview.stderr)
             self.assertFalse(install.exists(), "dry run wrote to fake device")
+            # Existing .106 installation parent directories have setgid and
+            # a non-root group. New releases must never normalize them.
+            releases = install / "releases"
+            releases.mkdir(parents=True)
+            install.chmod(0o2755)
+            releases.chmod(0o2755)
+            parent_modes = (install.stat().st_mode & 0o7777,
+                            releases.stat().st_mode & 0o7777)
             first = subprocess.run(base, capture_output=True, text=True)
             self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+            self.assertEqual(parent_modes, (install.stat().st_mode & 0o7777,
+                                            releases.stat().st_mode & 0o7777))
             release = install / "releases" / SHA
             self.assertEqual(len(list((release / "bin").iterdir())), 24)
             self.assertIn("ACTIVATED=false", (release / "CI-READY").read_text())
@@ -145,14 +155,22 @@ class NuraCiAnsibleTests(unittest.TestCase):
         self.assertIn("192.168.23.106", inventory)
         self.assertIn("expected_root_source: \"/dev/mmcblk1p1\"", inventory)
         self.assertIn("7001004d4d43333247448d402a656e00", inventory)
+        self.assertIn('expected_os_id: "nura"', inventory)
+        self.assertIn('expected_kernel_release: "7.0.1-postmarketos-grate-dmavde1-minus-cma"', inventory)
         self.assertIn("nuraloumi_approved_git_sha:", inventory)
         self.assertIn("nuraloumi_approved_tar_sha256:", inventory)
         self.assertIn("nuraloumi_approved_manifest_sha256:", inventory)
         self.assertIn("nura_ci_sha == nuraloumi_approved_git_sha", book)
         self.assertIn("('EMMC_CID=' ~ expected_emmc_cid)", book)
         self.assertIn("('ROOT=' ~ expected_root_source)", book)
+        self.assertIn("('OS_ID=' ~ expected_os_id)", book)
+        self.assertIn("'MUSL_LOADER=present'", book)
+        self.assertIn("playbook_dir }}/../data/nuraloumi/", book)
+        self.assertNotIn("/workspace/deploy/ansible/tools/nuraloumi_ci_payload.py", book)
         self.assertIn("SL101_NURALOUMI_STAGE", entry)
         self.assertIn("SL101_APPLY", entry)
+        tasks = (DEPLOY / "playbooks/nuraloumi-stage-tasks.yml").read_text()
+        self.assertGreaterEqual(tasks.count("when: not ansible_check_mode"), 8)
         for forbidden in ("sl101-100", "reboot ", "kexec ", "dd if=", "fw_setenv",
                           "systemctl restart", "rc-service restart"):
             self.assertNotIn(forbidden, book)

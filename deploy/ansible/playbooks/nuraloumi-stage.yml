@@ -8,7 +8,11 @@
   vars:
     nura_ci_sha: "{{ lookup('ansible.builtin.env', 'SL101_NURALOUMI_SHA', default='') }}"
     nura_ci_run: "{{ lookup('ansible.builtin.env', 'SL101_NURALOUMI_RUN_ID', default='') }}"
-    nura_ci_payload: "/data/nuraloumi/{{ nura_ci_sha }}"
+    # Both host-run Ansible and the Docker controller use the same
+    # repository-owned, Git-ignored staging directory. Avoid Docker-only
+    # /data and /workspace absolute paths so the controller can reuse
+    # an already authenticated host SSH connection for read-only checks.
+    nura_ci_payload: "{{ playbook_dir }}/../data/nuraloumi/{{ nura_ci_sha }}"
     nura_install_base: /opt/nuraloumi
     nura_release_root: "{{ nura_install_base }}/releases/{{ nura_ci_sha }}"
   pre_tasks:
@@ -30,7 +34,7 @@
       ansible.builtin.command:
         argv:
           - python3
-          - /workspace/deploy/ansible/tools/nuraloumi_ci_payload.py
+          - "{{ playbook_dir }}/../tools/nuraloumi_ci_payload.py"
           - verify
           - --root
           - "{{ nura_ci_payload }}"
@@ -56,6 +60,12 @@
         printf 'KERNEL=%s\n' "$(uname -r)"
         . /etc/os-release
         printf 'OS_ID=%s\n' "$ID"
+        printf 'ARCH=%s\n' "$(uname -m)"
+        if [ -e /lib/ld-musl-armhf.so.1 ]; then
+          printf 'MUSL_LOADER=present\n'
+        else
+          printf 'MUSL_LOADER=missing\n'
+        fi
       register: nura_identity
       changed_when: false
       check_mode: false
@@ -68,10 +78,13 @@
           - ('SD_CID=' ~ expected_sd_cid) in nura_identity.stdout_lines
           - ('ROOT=' ~ expected_root_source) in nura_identity.stdout_lines
           - ('KERNEL=' ~ expected_kernel_release) in nura_identity.stdout_lines
-          - "'OS_ID=alpine' in nura_identity.stdout_lines"
+          - ('OS_ID=' ~ expected_os_id) in nura_identity.stdout_lines
+          - "'ARCH=armv7l' in nura_identity.stdout_lines"
+          - "'MUSL_LOADER=present' in nura_identity.stdout_lines"
         fail_msg: >-
-          Physical .106 identity, kernel or SD root does not match the
-          2026-11-11 receipt. Refusing staged deployment without a new review.
+          Physical .106 identity, Nura/musl ABI, minus-CMA kernel or SD root
+          does not match the latest 2026-11-11 receipt. Refusing staging;
+          never auto-update the pinned kernel during the A-B-A experiment.
 
     - name: Check SD-backed /opt capacity before making a second complete release
       ansible.builtin.raw: "df -Pk /opt | awk 'NR==2 { print $4 }'"
@@ -100,9 +113,9 @@
       ansible.builtin.include_tasks: nuraloumi-stage-tasks.yml
 
   post_tasks:
-    - name: Explain safe next step (no current-pointer or compositor changes)
+    - name: Explain safe next step (read-only checks perform no copy tasks)
       ansible.builtin.debug:
         msg: >-
-          NuraLoumi CI {{ nura_ci_sha }} has been {{ 'PREVIEWED only' if ansible_check_mode
+          NuraLoumi CI {{ nura_ci_sha }} has been {{ 'PRECHECKED only (no file copying)' if ansible_check_mode
           else 'STAGED without activation' }} on .106 at {{ nura_release_root }}.
           Current Sway, panel, /opt/nuraloumi/current, boot and Mesa are unchanged.

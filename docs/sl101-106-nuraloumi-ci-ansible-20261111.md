@@ -1,8 +1,36 @@
 # .106 NuraLoumi CI-only Ansible preparation — 2026-11-11
 
-**Status: host-only preparation.** This work did NOT SSH, deploy, flash,
-reboot or restart Sway/panel, change any kernel or eMMC/SD data, or
-invoke the separately blocked comma-command hard cutover.
+**Status: host preparation and successful read-only .106 preflight.**
+The first preparation did not access the device. On 2026-11-11 a subsequent
+read-only check used the workstation's already authenticated SSH
+ControlMaster connection. It did NOT deploy, flash, reboot, restart
+Sway/panel, change any kernel or eMMC/SD data, or invoke the separately
+blocked comma-command hard cutover.
+
+## Actual read-only Ansible preflight receipt
+
+Run from repository root, using the host's existing authenticated SSH
+ControlMaster and strictly checked host key (rather than expecting the
+isolated Docker container to inherit the mux session):
+
+    SL101_NURALOUMI_SHA=6d4f7b2d728db3251d244bdebf38dc6e415856f5 \
+      SL101_NURALOUMI_RUN_ID=42927406671 \
+      ANSIBLE_SSH_ARGS='-o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ControlMaster=auto' \
+      ansible-playbook -i deploy/ansible/inventory/hosts.yml \
+        deploy/ansible/playbooks/nuraloumi-stage.yml --limit sl101-nura --check
+
+Verified receipt:
+
+    sl101-nura: ok=14 changed=0 unreachable=0 failed=0 skipped=9
+
+The checks confirmed the exact physical CIDs, SD root, Nura/musl ABI,
+running minus-CMA benchmark kernel, more than 90 MiB free disk space,
+and the pinned complete CI artifact. The active panel/current symlink
+were not replaced. The read-only check found the existing
+`/opt/nuraloumi` and `releases` parents use group 12345 and setgid mode
+`2755`; the stage tasks were repaired to preserve these live-directory
+attributes on a future write. This is preflight success, **not** hardware
+qualification of the new binaries or permission to activate them.
 
 ## Exact physical and CI contract
 
@@ -13,7 +41,8 @@ invoke the separately blocked comma-command hard cutover.
 | Internal eMMC CID | 7001004d4d43333247448d402a656e00 |
 | microSD CID | 035344534c31323880ac79a543010300 |
 | Linux root | /dev/mmcblk1p1, microSD |
-| Running kernel | 7.0.1-postmarketos-grate-dmavde1 |
+| Running kernel | 7.0.1-postmarketos-grate-dmavde1-minus-cma (benchmark B, NOT a production recommendation) |
+| Distribution ID | nura (Nura edge; ARMv7 musl loader confirmed) |
 | Kernel boot source | The working 8-MiB eMMC LNX slot (not SD extlinux) |
 | NuraLoumi source SHA | 6d4f7b2d728db3251d244bdebf38dc6e415856f5 |
 | Alpine Actions run | 42927406671, successfully completed |
@@ -23,7 +52,10 @@ invoke the separately blocked comma-command hard cutover.
 All these release selectors and checksums are pinned in
 deploy/ansible/inventory/hosts.yml. The physical device/boot evidence is
 docs/sl101-two-device-boot-and-kernel-contract-20261110.md and
-docs/sl101-106-dmavde1-flash-20261111.md.
+docs/sl101-106-dmavde1-flash-20261111.md. The later
+docs/sl101-106-minus-cma-deployment-20261111.md supersedes the older
+kernel pin for the ongoing A-B-A benchmark. Ansible intentionally
+refuses a subsequent kernel change until a new independent review.
 
 ## Staged source and integrity
 
@@ -49,12 +81,15 @@ before any remote write.
 | Operation | Effect |
 | --- | --- |
 | Controller prepare | Downloads from GitHub to local ignored data only; no tablet |
-| 'deploy nuraloumi-check' | Read-only SSH identity and Ansible check-mode preview |
+| 'deploy nuraloumi-check' | Read-only SSH identity, exact pinned CI checks, capacity/parent safety; copy tasks explicitly skipped |
 | 'deploy nuraloumi-stage' with both gates | Only versioned copies to /opt/nuraloumi/releases/<sha>/bin; remote hash checks and CI-READY |
 | Live activation | NOT implemented or authorized by this preparation |
 
 There is no APK installation, ephemeral-key enrollment, kernel/boot/Mesa
 mutation, Sway reload, WayVNC/keyd/init change or replacement of current.
+The real installation parents use setgid and a device-specific group;
+staging deliberately preserves their existing group and mode rather
+than normalizing them to root:root 0755.
 Files under /opt/nuraloumi/releases/<sha>/bin are inert until the operator
 explicitly authorizes promotion. The existing launcher reads
 /opt/nuraloumi/current/nuraloumi-panel, so any future activation must

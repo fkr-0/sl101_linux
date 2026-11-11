@@ -119,12 +119,27 @@ individual checksums before publishing in ignored data/nuraloumi/<sha>.
 The CI source SHA, run ID, tar digest and manifest digest are pinned in
 the reviewed inventory, not supplied merely by an untrusted JSON file.
 
-Read-only identity + staging preview (requires authenticated SSH to .106):
+Read-only identity + staging preflight, **tested successfully 2026-11-11**.
+From the workstation, the existing SSH config's authenticated ControlMaster
+may be reused without granting a new key to the controller container:
 
     export SL101_NURALOUMI_SHA=6d4f7b2d728db3251d244bdebf38dc6e415856f5
     export SL101_NURALOUMI_RUN_ID=42927406671
-    docker compose -f deploy/ansible/compose.yaml \
-      -f deploy/ansible/compose.nura.yaml run --rm deploy nuraloumi-check
+    ANSIBLE_SSH_ARGS='-o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ControlMaster=auto' \
+      ansible-playbook -i deploy/ansible/inventory/hosts.yml \
+        deploy/ansible/playbooks/nuraloumi-stage.yml --limit sl101-nura --check
+
+Expected recap is `changed=0, unreachable=0, failed=0`. In `--check`
+mode all 24 executable copy tasks and the readiness-marker write are
+explicitly skipped. The controller-only verifier and read-only target
+identity, disk capacity and symlink checks still run. The current
+approved benchmark-B kernel is `7.0.1-postmarketos-grate-dmavde1-minus-cma`,
+and `/etc/os-release` identifies `ID=nura` (not `alpine`).
+
+The Docker command remains available where the controller itself has a
+working, independently authenticated SSH key or permitted SSH multiplex
+transport. It does not automatically inherit the workstation's existing
+SSH ControlMaster connection.
 
 Staging-only write after explicit operator review (no activation):
 

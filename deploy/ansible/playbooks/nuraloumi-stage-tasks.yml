@@ -44,7 +44,20 @@
   loop_control:
     label: "{{ item.item }}"
 
-- name: Create only inactive release directories
+- name: Preserve existing installation parent ownership and setgid mode
+  become: "{{ not (sl101_molecule | default(false) | bool) }}"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    # Deliberately do not specify owner/group/mode on the active installation
+    # parents. On the real .106 they are root:12345 with setgid 2755; a
+    # normalizing directory task would silently remove that security model.
+  loop:
+    - "{{ nura_install_base }}"
+    - "{{ nura_install_base }}/releases"
+  when: not ansible_check_mode
+
+- name: Create only new CI release directories with known ownership
   become: "{{ not (sl101_molecule | default(false) | bool) }}"
   ansible.builtin.file:
     path: "{{ item }}"
@@ -53,10 +66,9 @@
     group: "{{ omit if (sl101_molecule | default(false) | bool) else 'root' }}"
     mode: "0755"
   loop:
-    - "{{ nura_install_base }}"
-    - "{{ nura_install_base }}/releases"
     - "{{ nura_release_root }}"
     - "{{ nura_release_root }}/bin"
+  when: not ansible_check_mode
 
 - name: Stage only exact CI-verified ARMv7 musl executables
   become: "{{ not (sl101_molecule | default(false) | bool) }}"
@@ -70,6 +82,7 @@
   loop: "{{ nura_ci_binaries }}"
   loop_control:
     label: "{{ item }}"
+  when: not ansible_check_mode
 
 - name: Stage controller-generated checksums and original CI manifest
   become: "{{ not (sl101_molecule | default(false) | bool) }}"
@@ -81,6 +94,7 @@
     mode: "0644"
     follow: false
   loop: [MANIFEST.txt, SHA256SUMS.bin]
+  when: not ansible_check_mode
 
 - name: Stage audited CI provenance without writing into boot or active symlinks
   become: "{{ not (sl101_molecule | default(false) | bool) }}"
@@ -92,6 +106,7 @@
     mode: "0644"
     follow: false
   loop: [CI-PROVENANCE.json, ELF-AUDIT.txt]
+  when: not ansible_check_mode
 
 - name: Enumerate all staged binaries before acknowledging readiness
   ansible.builtin.find:
