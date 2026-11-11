@@ -71,7 +71,54 @@ VDE cached_capture default=N. Initial dmesg and decoder smoke show
 no new CMA allocation, DMA or VDE async-worker errors. The wm8903
 audio warning is a known stock-baseline warning, not new to this RC.
 
-## B-side hardware benchmark smoke (not a full performance verdict)
+## Full B-side 60-run battery diagnostic (2026-11-11)
+
+**COMPLETE: 60/60 real hardware VDE H.264 decode pipelines** using the
+pinned 96-frame clip and the real CMA allocation tracepoints. Device .106
+stayed on the same minus-CMA kernel, boot ID
+2459039c-a4d8-4cdb-9128-dd3b3061f771; VDE cached_capture=N, no
+reboot, no KMS acquisition. The benchmark was run in explicitly
+labelled battery mode because the charger was **absent** (AC=0,
+battery ~88%, Discharging). That battery mode is deliberately
+**not eligible for the AC-only A1–B–A2 performance comparator**.
+
+| Metric | p50 | p95 | p99 |
+| --- | ---: | ---: | ---: |
+| H.264 pipeline wall time, ms | 1021.452 | 1106.163 | 1120.865 |
+| CMA core allocation, microseconds | 1063.5 | 2947.3 | 9675.76 |
+| Pipeline child CPU user, ms | 714.090 | 773.511 | 796.376 |
+| Pipeline child CPU system, ms | 205.364 | 267.667 | 285.349 |
+
+2040 matched CMA core allocations, zero tracing parse errors,
+zero kernel CMA allocation failures. `cma_alloc_success` increased
+by 2142 system-wide during the run. Original trace (871361 bytes),
+all individual 60 timing tuples and verified JSON report are retained
+outside Git:
+
+    work/sl101-106-dmavde1-minus-cma-deploy-20261111/cma-B60-battery-result.json
+    work/sl101-106-dmavde1-minus-cma-deploy-20261111/cma-B60-battery-pipelines.json
+    work/sl101-106-dmavde1-minus-cma-deploy-20261111/cma-B60-battery-trace.txt
+
+Result SHA-256: c958665afea2b3e3b7aa7b2f1bdd5e3f481b52c45940696fc939ec8789d6e11f.
+
+The battery was 88% before and immediately after the 60 runs
+(87% at later audit), CPU frequency **760 MHz at start, 1000 MHz at
+finish** with ondemand governor, and temperature 27→29 °C. The first
+15 decodes averaged 955.323 ms; the last 15 averaged 1031.829 ms.
+**Time/frequency drift and unplugged power make this a diagnostic,
+not a direct CMA overhead estimate.** Earlier 5-run CMA measurements
+were on AC and cannot serve as A1/A2 with matched conditions.
+
+After the run, Sway PID **1438** persisted; kernel tracer was **nop**,
+no private tracing instances remained, cached_capture=N, VDE/DRM
+nodes remained present, and no new DMA/CMA/VDE faults were detected.
+
+The full three-boot A1–B–A2 performance gate remains **OPEN**, not
+PASS or REGRESSION.
+
+## Earlier five-run B smoke and deployment
+
+
 
 A pinned 96-frame H.264 decoder run was repeated 5 times under the
 minus-CMA kernel. **170 matched CMA allocation events**, zero failures.

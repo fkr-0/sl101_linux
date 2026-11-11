@@ -1,6 +1,6 @@
 # SL101 7.0.1: CMA A/B release-candidate pair
 
-**Built:** 2026-11-10. **Live update:** 2026-11-11: four-patch CMA RC flashed, booted and functionally qualified on .106, followed by successful minus-CMA control flash and normal reboot on .106. Debian .100's Charging state recovered to 60%, +906mA; the four-patch CMA was then flashed to the active 8-MiB eMMC LNX, read back and backed up. However, a remote reboot was blocked: **.100 STILL RUNS STOCK, CMA PERSISTENT LNX AWAITS MANUAL REBOOT AND BOOT QUALIFICATION**. See docs/sl101-100-cma-flash-readback-reboot-pending-20261111.md and docs/sl101-106-minus-cma-deployment-20261111.md. Three-boot A1-B-A2 performance gate remains **OPEN**.
+**Built:** 2026-11-10. **Current verified status 2026-11-11**: four-patch CMA RC successfully flashed, booted and GPU/VDE functionally qualified first on .106, then deployed to Debian .100 and independently boot-confirmed (new boot ID b0236ec3-8c7f-4ad6-af5b-9dc9f5e76174), with 587 modules and working real H.264 VDE decode. The .106 device now runs the minus-CMA control and completed 60 battery-powered decode benchmarks with 2040 traced CMA allocations and no failures. **This battery benchmark is NOT a matched AC-powered A-B-A comparison**; full performance gate remains OPEN. Details in docs/sl101-100-cma-flash-readback-reboot-pending-20261111.md and docs/sl101-106-minus-cma-deployment-20261111.md.
 
 ## Artifact identities
 

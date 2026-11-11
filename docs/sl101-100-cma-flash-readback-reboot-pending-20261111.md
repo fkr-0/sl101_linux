@@ -1,10 +1,47 @@
-# Debian SL101 .100 — four-patch CMA eMMC flash verified; reboot pending
+# Debian SL101 .100 — four-patch CMA eMMC flash and normal reboot verified
 
-**Date:** 2026-11-11, 09:28–09:32 CET. **Device:** sltwrpbootdebian,
-192.168.23.100. **Result: eMMC kernel flash SUCCESSFUL, full physical
-readback and neighboring partition validation SUCCESSFUL. Normal reboot
-NOT performed: remote restart was blocked by an execution safety gate.
-The currently running kernel is STILL stock until a manual reboot.**
+**Date:** 2026-11-11, initial flash 09:28–09:32 CET; **live postboot
+verification later the same morning**. Device sltwrpbootdebian, 192.168.23.100.
+**Result: exact eMMC flash/readback SUCCESSFUL and subsequent
+USER-INITIATED normal reboot VERIFIED. The four-patch CMA kernel is
+now actually running.** The earlier tool-blocked remote reboot was
+superseded when the user manually rebooted.
+
+## Live normal reboot — SUCCESS (verified independently)
+
+Authenticated SSH verified a **new** boot ID:
+
+    b0236ec3-8c7f-4ad6-af5b-9dc9f5e76174
+
+Running `uname -r`:
+
+    7.0.1-postmarketos-grate-dmavde1
+
+The prior preboot ID was
+99aa22e5-432b-4ad8-b789-042d6fedf1c5. Physical IDs still match
+eMMC 7001004d4d43333247447e682c336e00 and
+microSD 03534453553332478030be3f6400b900; root remains /dev/mmcblk1p1.
+
+- All **587** matching modules present.
+- Kernel Tegra VDE module loaded.
+- /dev/video0, /dev/dri/card0, /dev/dri/renderD128 present.
+- Real H.264 **GStreamer v4l2slh264dec** decode from the existing
+  /home/user/sl101-video-ctl-360-audio-20261109.mp4 through fakesink
+  completed successfully in about **3 seconds**, with no KMS master
+  disruption.
+- Postboot and postdecode dmesg contain no detected DMA/CMA/VDE
+  allocation faults, mutex-unlock failures, oops or panic.
+- The already-known stock-baseline warning at
+  sound/soc/codecs/wm8903.c:2114 is still present.
+- Battery Charging, 65% +834mA at initial postboot check, subsequently
+  Charging at 70%.
+
+This is the successful hardware boot + VDE smoke check. It is not a
+long-duration stability, GPU pixel or complete CMA A/B performance
+qualification. .106 continues with the minus-CMA control kernel.
+
+**The original preboot flash receipt below is retained for provenance.
+Its former "reboot pending" status is historical, no longer current.**
 
 ## Power recovery and exact target
 
@@ -87,7 +124,7 @@ after the write, **with no changes**:
 
 No BCT, EBT, Android user data, partition table or device .106 writes.
 
-## NEXT: reboot and post-boot qualification, not yet done
+## Historical preboot handoff (now superseded by successful reboot above)
 
 After the successful flash/readback, remote execution of the reboot
 was **blocked by the tool execution safety policy**; it was not issued

@@ -4,6 +4,8 @@ from __future__ import annotations
 import copy
 import importlib.util
 from pathlib import Path
+import subprocess
+import sys
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,6 +53,49 @@ def sequence():
 
 
 class ABABenchmarkTests(unittest.TestCase):
+    def test_power_profiles_keep_battery_separate_from_ac_comparison(self):
+        ac = {"ac": "1", "battery_percent": 61, "charge_status": "Charging",
+              "battery_current_uA": 500000}
+        battery = {"ac": "0", "battery_percent": 89,
+                   "charge_status": "Discharging", "battery_current_uA": -180000}
+        BENCH.validate_power_profile(ac, "ac")
+        BENCH.validate_power_profile(battery, "battery")
+        with self.assertRaisesRegex(RuntimeError, "AC absent"):
+            BENCH.validate_power_profile(battery, "ac")
+        with self.assertRaisesRegex(RuntimeError, "AC=0"):
+            BENCH.validate_power_profile(ac, "battery")
+
+    def test_battery_mode_refuses_low_charge_or_heavy_draw(self):
+        state = {"ac": "0", "battery_percent": 79,
+                 "charge_status": "Discharging", "battery_current_uA": -180000}
+        with self.assertRaisesRegex(RuntimeError, "80%"):
+            BENCH.validate_power_profile(state, "battery")
+        state["battery_percent"] = 85
+        state["battery_current_uA"] = -750000
+        with self.assertRaisesRegex(RuntimeError, "discharge current"):
+            BENCH.validate_power_profile(state, "battery")
+        state["battery_current_uA"] = -180000
+        state["battery_percent"] = 74
+        with self.assertRaisesRegex(RuntimeError, "75%"):
+            BENCH.validate_power_profile(state, "battery", finish=True)
+
+    def test_comparison_gate_rejects_battery_run(self):
+        a, b, a2 = sequence()
+        b["power_profile"] = "battery"
+        b["started"]["ac"] = b["finished"]["ac"] = "0"
+        with self.assertRaisesRegex(ValueError, "battery diagnostic"):
+            CMP.compare(a, b, a2)
+        # A forged/incorrect AC sensor field must not admit battery data.
+        b["started"]["ac"] = b["finished"]["ac"] = "1"
+        with self.assertRaisesRegex(ValueError, "battery diagnostic"):
+            CMP.compare(a, b, a2)
+
+    def test_bench_cli_help_is_valid_on_python314(self):
+        cmd = [sys.executable, str(ROOT / "scripts/sl101-dmavde-cma-ab-bench.py"), "--help"]
+        result = subprocess.run(cmd, text=True, capture_output=True, timeout=8)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--power-profile", result.stdout)
+
     def test_valid_aba_performance_pass(self):
         report = CMP.compare(*sequence())
         self.assertEqual(report["performance_gate"], "PASS")

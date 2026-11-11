@@ -33,6 +33,10 @@ def validate_phase(data: dict, variant: str) -> None:
     require(data.get("schema") == SCHEMA, "invalid benchmark schema")
     require(data.get("variant") == variant, "variant mismatch")
     require(data.get("release") == REL[variant], "kernel ABI mismatch")
+    # Earlier AC-only result files had no power_profile field. Explicit
+    # standalone battery diagnostics must never qualify for matched A-B-A.
+    require(data.get("power_profile", "ac") == "ac",
+            "battery diagnostic is not eligible for AC-only A-B-A comparison")
     require(data.get("repeats", 0) >= 30, "insufficient pipeline samples")
     require(data["trace"]["matched_core_allocations"] >= data["repeats"] * 10,
             "incomplete CMA trace samples")

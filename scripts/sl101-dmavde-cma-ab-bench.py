@@ -157,14 +157,36 @@ def health() -> dict:
     thermal = Path("/sys/class/thermal/thermal_zone0/temp")
     ac = Path("/sys/class/power_supply/ac-adapter-detect/online")
     bat = Path("/sys/class/power_supply/sbs-5-000b/capacity")
+    status = Path("/sys/class/power_supply/sbs-5-000b/status")
+    current = Path("/sys/class/power_supply/sbs-5-000b/current_now")
     return {
         "boot_id": read(Path("/proc/sys/kernel/random/boot_id")),
         "cpu_khz": int(read(cpu)) if cpu.is_file() else None,
         "temperature_mC": int(read(thermal)) if thermal.is_file() else None,
         "ac": read(ac) if ac.is_file() else None,
         "battery_percent": int(read(bat)) if bat.is_file() else None,
+        "charge_status": read(status) if status.is_file() else None,
+        "battery_current_uA": int(read(current)) if current.is_file() else None,
         "vmstat": cma_vmstat(),
     }
+
+def validate_power_profile(state: dict, profile: str, *, finish: bool = False) -> None:
+    """Keep AC-only A/B gate intact; battery mode is standalone diagnostic."""
+    if profile == "ac":
+        if state["ac"] != "1":
+            raise RuntimeError("AC absent; A/B benchmark invalid")
+        return
+    if profile != "battery":
+        raise ValueError("unknown power profile")
+    if state["ac"] != "0":
+        raise RuntimeError("battery benchmark requires AC=0 for stable profile")
+    if state["charge_status"] != "Discharging":
+        raise RuntimeError("battery benchmark not in Discharging state")
+    minimum = 75 if finish else 80
+    if state["battery_percent"] is None or state["battery_percent"] < minimum:
+        raise RuntimeError(f"battery below {minimum}%; refuse battery benchmark")
+    if state["battery_current_uA"] is None or state["battery_current_uA"] < -600000:
+        raise RuntimeError("excessive/unknown discharge current in battery mode")
 
 
 def put(path: Path, value: str) -> None:
@@ -230,8 +252,8 @@ def run(args: argparse.Namespace) -> dict:
         raise RuntimeError("wrong eMMC physical CID")
     if read(Path("/sys/module/tegra_vde/parameters/cached_capture")) != "N":
         raise RuntimeError("VDE cached_capture not at baseline N")
-    if read(Path("/sys/class/power_supply/ac-adapter-detect/online")) != "1":
-        raise RuntimeError("AC absent; benchmark invalid")
+    power_state = health()
+    validate_power_profile(power_state, args.power_profile)
     module = Path(f"/lib/modules/{uname}/kernel/drivers/media/platform/nvidia/tegra-vde/tegra-vde.ko.zst")
     if sha(module) != config["vde_sha"]:
         raise RuntimeError("wrong VDE module binary for running kernel")
@@ -249,6 +271,7 @@ def run(args: argparse.Namespace) -> dict:
         raise RuntimeError("Sway supervisor not running; refuse")
     sway_pid = sway_proc.stdout.strip()
     vm_before = health()
+    validate_power_profile(vm_before, args.power_profile)
     # Prewarm dynamic libraries/firmware in the same mode, not included in measurements.
     for _ in range(3):
         run_pipeline(CLIP)
@@ -264,7 +287,8 @@ def run(args: argparse.Namespace) -> dict:
             timing = run_pipeline(CLIP)
             timings.append(timing)
             if (i + 1) % 15 == 0:
-                print(f"BENCH_PROGRESS variant={args.variant} {i+1}/{args.repeats}", flush=True)
+                validate_power_profile(health(), args.power_profile)
+                print(f"BENCH_PROGRESS variant={args.variant} power={args.power_profile} {i+1}/{args.repeats}", flush=True)
         put(INSTANCE / "tracing_on", 0)
         trace_text = (INSTANCE / "trace").read_text()
     except Exception as exc:
@@ -277,6 +301,7 @@ def run(args: argparse.Namespace) -> dict:
         raise RuntimeError(error)
     trace = parse_trace(trace_text)
     vm_after = health()
+    validate_power_profile(vm_after, args.power_profile, finish=True)
     if vm_after["boot_id"] != vm_before["boot_id"]:
         raise RuntimeError("boot ID changed during benchmark")
     after_sway = subprocess.run(["pgrep", "-xo", "sl101-sway"], capture_output=True, text=True)
@@ -290,6 +315,7 @@ def run(args: argparse.Namespace) -> dict:
     result = {
         "schema": "sl101-cma-ab-hardware-v1",
         "variant": args.variant,
+        "power_profile": args.power_profile,
         "release": uname,
         "boot_id": vm_before["boot_id"],
         "vde_module_sha256": config["vde_sha"],
@@ -309,6 +335,7 @@ def run(args: argparse.Namespace) -> dict:
             "private tracepoints have small overhead, same tracepoints/clip used in both kernels",
             "core_cma_us excludes the CMA patch remap; pipeline_wall_ms includes it",
             "end-to-end pipeline timings include userspace startup, decoding and CMA allocation",
+            "A/B requires AC on BOTH kernels; power_profile=battery is diagnostic-only and comparator rejects AC=0",
             "A/B must be balanced against temperature, CPU frequency, and load drift",
         ],
     }
@@ -333,6 +360,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--variant", choices=sorted(KERNELS), required=True)
     parser.add_argument("--repeats", type=int, default=60)
+    parser.add_argument("--power-profile", choices=("ac", "battery"), default="ac",
+                        help="AC required by default; battery allows standalone diagnostics only at >=80%%")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
     try:
