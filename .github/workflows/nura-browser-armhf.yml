@@ -1,0 +1,88 @@
+name: NuraBrowser WPE 2.54 ARMHF release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - 'nurabrowser-ci-*'
+    paths:
+      - '.github/workflows/nura-browser-armhf.yml'
+      - 'nura-browser/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nurabrowser-armhf-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  armhf:
+    name: WPE 2.54 / ARMv7 hard float / VFPv3-D16 / no NEON
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Fetch and SHA256-verify pinned Debian WPE 2.54 armhf packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/nura-wpe-pkgs"
+          cd "$RUNNER_TEMP/nura-wpe-pkgs"
+          curl -fL --retry 5 --retry-all-errors --connect-timeout 20 --max-time 180 \
+            -o libwpewebkit-2.0-1_2.54.0-2_armhf.deb \
+            https://snapshot.debian.org/archive/debian/20260919T000000Z/pool/main/w/wpewebkit/libwpewebkit-2.0-1_2.54.0-2_armhf.deb
+          curl -fL --retry 5 --retry-all-errors --connect-timeout 20 --max-time 180 \
+            -o libwpewebkit-2.0-dev_2.54.0-2_armhf.deb \
+            https://snapshot.debian.org/archive/debian/20260919T000000Z/pool/main/w/wpewebkit/libwpewebkit-2.0-dev_2.54.0-2_armhf.deb
+          printf '%s\n' \
+            '0b3713cae5520fb44a6fcb099b0b23b8f2802bf3e3a57415fc36b9616bc84ffb  libwpewebkit-2.0-1_2.54.0-2_armhf.deb' \
+            '8fe43cebac76de223b5e181eaa049bb21f788fb935dd620fdc640e3b440486f9  libwpewebkit-2.0-dev_2.54.0-2_armhf.deb' \
+            | sha256sum -c -
+
+      - name: Build CI-only cross-toolchain image from digest-pinned Debian
+        run: |
+          set -euo pipefail
+          docker build --pull=false --progress=plain \
+            --tag sl101-nurabrowser-ci:2.54.0-2 \
+            --file nura-browser/packaging/Dockerfile.ci-armhf \
+            "$RUNNER_TEMP/nura-wpe-pkgs"
+          docker image inspect --format '{{.Id}}' sl101-nurabrowser-ci:2.54.0-2 \
+            > "$RUNNER_TEMP/nura-wpe-pkgs/BUILDER-IMAGE-ID.txt"
+
+      - name: Build, link and qualify ARMHF browser entirely in CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/nurabrowser-ci-output"
+          docker run --rm --network none \
+            --user "$(id -u):$(id -g)" \
+            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/src,readonly" \
+            --mount "type=bind,src=$RUNNER_TEMP/nurabrowser-ci-output,dst=/out" \
+            --env GITHUB_SHA --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT \
+            --entrypoint /bin/sh sl101-nurabrowser-ci:2.54.0-2 \
+            /src/nura-browser/scripts/ci-build-armhf.sh
+          cp "$RUNNER_TEMP/nura-wpe-pkgs/BUILDER-IMAGE-ID.txt" \
+            "$RUNNER_TEMP/nurabrowser-ci-output/BUILDER-IMAGE-ID.txt"
+
+      - name: Upload only audited CI binary and full provenance
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: nurabrowser-armhf-${{ github.run_id }}-${{ github.sha }}
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/nurabrowser-ci-output/nurabrowser-ci.tar
+            ${{ runner.temp }}/nurabrowser-ci-output/SHA256SUMS.txt
+            ${{ runner.temp }}/nurabrowser-ci-output/BIN-SHA256SUMS.txt
+            ${{ runner.temp }}/nurabrowser-ci-output/BUILDER-PACKAGES.tsv
+            ${{ runner.temp }}/nurabrowser-ci-output/BUILDER-IMAGE-ID.txt
+            ${{ runner.temp }}/nurabrowser-ci-output/ELF-HEADER.txt
+            ${{ runner.temp }}/nurabrowser-ci-output/ELF-ATTRIBUTES.txt
+            ${{ runner.temp }}/nurabrowser-ci-output/ELF-NEEDED.txt
+            ${{ runner.temp }}/nurabrowser-ci-output/NO-NEON-QEMU.txt

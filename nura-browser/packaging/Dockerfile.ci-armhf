@@ -1,0 +1,29 @@
+# syntax=docker/dockerfile:1
+# CI build container only; never deployed to an SL101.
+FROM debian@sha256:873bf43b48d52ba792b98de93232153e59d4946b93cbd89d91cffef0df4ce823
+
+ARG DEBIAN_FRONTEND=noninteractive
+RUN dpkg --add-architecture armhf \
+    && apt-get -o Acquire::Retries=3 update \
+    && apt-get install -y --no-install-recommends \
+       ca-certificates python3 python3-yaml \
+       build-essential gcc-arm-linux-gnueabihf \
+       binutils-arm-linux-gnueabihf meson ninja-build pkgconf \
+       qemu-user file git \
+       libglib2.0-dev libjson-glib-dev \
+       libglib2.0-dev:armhf libjson-glib-dev:armhf \
+    && rm -rf /var/lib/apt/lists/*
+
+# The CI workflow downloads two pinned Debian snapshot .deb files and
+# independently verifies their SHA256 before docker build.
+COPY libwpewebkit-2.0-1_2.54.0-2_armhf.deb /tmp/wpe-runtime.deb
+COPY libwpewebkit-2.0-dev_2.54.0-2_armhf.deb /tmp/wpe-dev.deb
+RUN apt-get -o Acquire::Retries=3 update \
+    && apt-get install -y --no-install-recommends \
+       /tmp/wpe-runtime.deb /tmp/wpe-dev.deb \
+    && test "$(dpkg-query -W -f='${Version}' libwpewebkit-2.0-1:armhf)" = '2.54.0-2' \
+    && test "$(dpkg-query -W -f='${Version}' libwpewebkit-2.0-dev:armhf)" = '2.54.0-2' \
+    && rm /tmp/wpe-runtime.deb /tmp/wpe-dev.deb \
+    && rm -rf /var/lib/apt/lists/*
+
+CMD ["/bin/sh"]

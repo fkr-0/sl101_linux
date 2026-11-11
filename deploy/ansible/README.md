@@ -1,5 +1,52 @@
 # SL101 Ansible via Docker Compose
 
+## NuraBrowser WPE 2.54 CI-only release
+
+NuraBrowser is built in GitHub Actions by
+.github/workflows/nura-browser-armhf.yml from the genuine WPE WebKit
+2.54.0-2 ARMHF SDK. The CI image pins its Debian base-image digest and
+WPE .deb SHA256, runs actual ARMHF crosslink/ABI/no-NEON-QEMU checks,
+and uploads a complete versioned artifact with original build provenance.
+
+Import **only** the exact approved successful GitHub run:
+
+    python3 deploy/ansible/tools/nura_browser_ci_payload.py prepare \
+      --sha <approved-40-character-git-sha> --run-id <approved-run-id> \
+      --tar-sha256 <approved-original-ci-tar-sha256>
+
+The Git-reviewed inventory pins SHA, run ID and tar digest independently.
+The script checks the GitHub Actions API run's success, workflow path,
+repository, source commit, branch, exact artifact name, tar structure,
+ELF32 ARM hard-float/VFPv3-D16, WPE DT_NEEDED, CI manifest and hashes.
+It does not accept host-compiled developer binaries. The downloaded
+release is stored in ignored data/nura-browser/<sha>.
+
+Read-only Ansible identity, runtime and artifact preflight:
+
+    SL101_NURABROWSER_SHA=<sha> SL101_NURABROWSER_RUN_ID=<run-id> \
+    ANSIBLE_SSH_ARGS='-o BatchMode=yes -o StrictHostKeyChecking=yes -o ControlMaster=auto' \
+      ansible-playbook -i deploy/ansible/inventory/hosts.yml \
+        deploy/ansible/playbooks/nura-browser-stage.yml \
+        --limit sl101-nura --check
+
+Stage the inactive CI-only release after an identical clean preflight:
+
+    SL101_APPLY=YES SL101_NURABROWSER_STAGE=YES \
+    SL101_NURABROWSER_SHA=<sha> SL101_NURABROWSER_RUN_ID=<run-id> \
+    ANSIBLE_SSH_ARGS='-o BatchMode=yes -o StrictHostKeyChecking=yes -o ControlMaster=auto' \
+      ansible-playbook -i deploy/ansible/inventory/hosts.yml \
+        deploy/ansible/playbooks/nura-browser-stage.yml \
+        --limit sl101-nura
+
+This installs **only** /opt/nura-browser/releases/<sha>, retaining the
+complete original CI artifact, exact remote checksums and CI-STAGED.
+It does not replace Cog, install a global ,browse command, bind mount
+the Debian runtime, start WebKit, or restart Sway/NuraLoumi. The device's
+browser-only kernel/boot pins are independent of the previous
+NuraLoumi minus-CMA A/B experiment. Any reboot, kernel transition or
+library hash change fails closed and requires a new verified receipt.
+See docs/sl101-nurabrowser-ci-deploy-20261111.md.
+
 The workstation owns Ansible. The devices run no Ansible controller. Root
 workspace, inventory, data and SSH directories are bind-mounted read-only.
 The container runs without privileges, host Docker socket, or host networking;

@@ -1,0 +1,230 @@
+---
+# CI-only NuraBrowser ARMHF staging, independent from the current Cog
+# executable, current Sway session, NuraLoumi activation and boot stack.
+# This does NOT install the new browser in the live Debian Cog root.
+- name: CI-only NuraBrowser WPE 2.54 release staging on physical SL101 .106
+  hosts: sl101-nura
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    browser_ci_sha: "{{ lookup('ansible.builtin.env', 'SL101_NURABROWSER_SHA', default='') }}"
+    browser_ci_run: "{{ lookup('ansible.builtin.env', 'SL101_NURABROWSER_RUN_ID', default='') }}"
+    browser_base: /opt/nura-browser
+    browser_release: "{{ browser_base }}/releases/{{ browser_ci_sha }}"
+    browser_payload: "{{ playbook_dir }}/../data/nura-browser/{{ browser_ci_sha }}"
+  pre_tasks:
+    - name: Require one exact approved CI identity, not a local developer build
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'sl101-nura'
+          - ansible_play_hosts_all | length == 1
+          - ansible_host == '192.168.23.106'
+          - browser_ci_sha is match('^[a-f0-9]{40}$')
+          - browser_ci_run is match('^[1-9][0-9]*$')
+          - browser_ci_sha == nura_browser_approved_git_sha
+          - browser_ci_run == nura_browser_approved_ci_run
+          - nura_browser_approved_tar_sha256 is match('^[a-f0-9]{64}$')
+          - nura_browser_approved_kernel_release == '7.0.1-postmarketos-grate-dmavde1'
+          - browser_base == '/opt/nura-browser'
+        fail_msg: >-
+          Refusing unapproved CI source, run or physical target; never stage
+          a locally compiled developer binary.
+
+    - name: Recheck every byte of the downloaded GitHub Actions release on controller
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../tools/nura_browser_ci_payload.py"
+          - verify
+          - --sha
+          - "{{ browser_ci_sha }}"
+          - --run-id
+          - "{{ browser_ci_run }}"
+          - --tar-sha256
+          - "{{ nura_browser_approved_tar_sha256 }}"
+          - --out-root
+          - "{{ playbook_dir }}/../data/nura-browser"
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      check_mode: false
+      register: browser_ci_verifier
+
+    - name: Require verified CI-only static audit receipt
+      ansible.builtin.assert:
+        that:
+          - (browser_ci_verifier.stdout | from_json).status == 'CI-STATIC-READY-RUNTIME-UNQUALIFIED'
+          - (browser_ci_verifier.stdout | from_json).sha == browser_ci_sha
+          - (browser_ci_verifier.stdout | from_json).run_id == browser_ci_run
+
+    - name: Read physical device identity and pinned Cog runtime (read-only)
+      ansible.builtin.raw: |
+        printf 'HOST=%s\n' "$(hostname)"
+        printf 'SD_CID=%s\n' "$(cat /sys/block/mmcblk1/device/cid)"
+        printf 'EMMC_CID=%s\n' "$(cat /sys/block/mmcblk0/device/cid)"
+        printf 'ROOT=%s\n' "$(findmnt -n -o SOURCE /)"
+        printf 'KERNEL=%s\n' "$(uname -r)"
+        printf 'BOOT_ID=%s\n' "$(cat /proc/sys/kernel/random/boot_id)"
+        . /etc/os-release
+        printf 'OS_ID=%s\n' "$ID"
+        printf 'ARCH=%s\n' "$(uname -m)"
+        printf 'WPE_SHA=%s\n' "$(sha256sum /opt/sl101-cog-wpe-debian/usr/lib/arm-linux-gnueabihf/libWPEWebKit-2.0.so.1 | cut -d' ' -f1)"
+        printf 'WEBP_SHA=%s\n' "$(sha256sum /opt/sl101-cog-wpe-debian/opt/sl101-webp-nosimd/lib/libwebp.so.7 | cut -d' ' -f1)"
+        printf 'SHARPYUV_SHA=%s\n' "$(sha256sum /opt/sl101-cog-wpe-debian/opt/sl101-webp-nosimd/lib/libsharpyuv.so.0 | cut -d' ' -f1)"
+      register: browser_device_identity
+      changed_when: false
+      check_mode: false
+
+    - name: Fail closed on kernel, boot, physical or Cog runtime changes
+      ansible.builtin.assert:
+        that:
+          - ('HOST=' ~ expected_hostname) in browser_device_identity.stdout_lines
+          - ('SD_CID=' ~ expected_sd_cid) in browser_device_identity.stdout_lines
+          - ('EMMC_CID=' ~ expected_emmc_cid) in browser_device_identity.stdout_lines
+          - ('ROOT=' ~ expected_root_source) in browser_device_identity.stdout_lines
+          - ('OS_ID=' ~ expected_os_id) in browser_device_identity.stdout_lines
+          - ('KERNEL=' ~ nura_browser_approved_kernel_release) in browser_device_identity.stdout_lines
+          - ('BOOT_ID=' ~ nura_browser_approved_boot_id) in browser_device_identity.stdout_lines
+          - "'ARCH=armv7l' in browser_device_identity.stdout_lines"
+          - ('WPE_SHA=' ~ nura_browser_approved_wpe_sha256) in browser_device_identity.stdout_lines
+          - ('WEBP_SHA=' ~ nura_browser_approved_webp_nosimd_sha256) in browser_device_identity.stdout_lines
+          - ('SHARPYUV_SHA=' ~ nura_browser_approved_sharpyuv_nosimd_sha256) in browser_device_identity.stdout_lines
+        fail_msg: >-
+          Browser staging refused. Boot, storage identity, GLIBC/WPE or
+          no-SIMD runtime may have changed. Never silently rewrite the pin.
+
+    - name: Check enough space on the SD-backed /opt
+      ansible.builtin.raw: "df -Pk /opt | awk 'NR==2 {print $4}'"
+      check_mode: false
+      changed_when: false
+      register: browser_free_space_kib
+
+    - name: Require 128 MiB reserve before writing an inactive release
+      ansible.builtin.assert:
+        that:
+          - browser_free_space_kib.stdout | trim | int >= 131072
+
+    - name: Require explicit stage approval outside check mode
+      ansible.builtin.assert:
+        that:
+          - ansible_check_mode or
+            (lookup('ansible.builtin.env', 'SL101_APPLY', default='NO') == 'YES'
+             and lookup('ansible.builtin.env', 'SL101_NURABROWSER_STAGE', default='NO') == 'YES')
+        fail_msg: "An inactive CI-only release requires SL101_APPLY=YES and SL101_NURABROWSER_STAGE=YES."
+
+    - name: Inspect versioned deployment parents without following symlinks
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ browser_base }}"
+        - "{{ browser_base }}/releases"
+        - "{{ browser_release }}"
+      register: browser_directory_preflight
+      changed_when: false
+
+    - name: Refuse existing symlinks or unexpected file types
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists or (item.stat.isdir and not item.stat.islnk)
+      loop: "{{ browser_directory_preflight.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+  tasks:
+    - name: Stage CI artifact only (no active Cog/NuraLoumi mutation)
+      when: not ansible_check_mode
+      block:
+        - name: Create versioned inactive CI release directory
+          become: true
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
+          loop:
+            - "{{ browser_base }}"
+            - "{{ browser_base }}/releases"
+            - "{{ browser_release }}"
+
+        - name: Transfer exactly the audited GitHub Actions tar
+          become: true
+          ansible.builtin.copy:
+            src: "{{ browser_payload }}/nurabrowser-ci.tar"
+            dest: "{{ browser_release }}/nurabrowser-ci.tar"
+            owner: root
+            group: root
+            mode: "0644"
+            follow: false
+
+        - name: Verify remote tar digest before any extraction
+          become: true
+          ansible.builtin.command:
+            argv:
+              - sha256sum
+              - "{{ browser_release }}/nurabrowser-ci.tar"
+          register: browser_remote_tar
+          changed_when: false
+
+        - name: Refuse changed CI artifact
+          ansible.builtin.assert:
+            that:
+              - browser_remote_tar.stdout.split()[0] == nura_browser_approved_tar_sha256
+
+        - name: Extract only pinned, preverified archive into inactive release
+          become: true
+          ansible.builtin.command:
+            argv: [tar, -xf, "{{ browser_release }}/nurabrowser-ci.tar", -C, "{{ browser_release }}"]
+            creates: "{{ browser_release }}/release/bin/nurabrowser-core"
+
+        - name: Transfer original CI binary hash list
+          become: true
+          ansible.builtin.copy:
+            src: "{{ browser_payload }}/BIN-SHA256SUMS.txt"
+            dest: "{{ browser_release }}/BIN-SHA256SUMS.txt"
+            owner: root
+            group: root
+            mode: "0644"
+            follow: false
+
+        - name: Verify executable bytes on .106 before marking CI staged
+          become: true
+          ansible.builtin.command:
+            argv: [sha256sum, -c, BIN-SHA256SUMS.txt]
+            chdir: "{{ browser_release }}"
+          changed_when: false
+
+        - name: Preserve exact GitHub CI run receipt
+          become: true
+          ansible.builtin.copy:
+            src: "{{ browser_payload }}/CI-GITHUB-RUN.json"
+            dest: "{{ browser_release }}/CI-GITHUB-RUN.json"
+            owner: root
+            group: root
+            mode: "0644"
+            follow: false
+
+        - name: Mark inactive, static-only CI staging
+          become: true
+          ansible.builtin.copy:
+            dest: "{{ browser_release }}/CI-STAGED"
+            owner: root
+            group: root
+            mode: "0644"
+            content: |
+              NURABROWSER_CI_STAGED=true
+              GIT_SHA={{ browser_ci_sha }}
+              RUN_ID={{ browser_ci_run }}
+              TAR_SHA256={{ nura_browser_approved_tar_sha256 }}
+              RUNTIME_QUALIFIED=false
+              ACTIVATED=false
+
+  post_tasks:
+    - name: Report inactive CI release
+      ansible.builtin.debug:
+        msg: >-
+          CI-only NuraBrowser {{ browser_ci_sha }} was {{ 'READ-ONLY PREFLIGHTED'
+          if ansible_check_mode else 'STAGED (INACTIVE)' }} at {{ browser_release }}.
+          No public ,browse alias, Cog, Sway, NuraLoumi, kernel, Wayland or GPU
+          state was changed. Native WPEPlatform headless qualification remains required.
