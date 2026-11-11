@@ -1,6 +1,6 @@
 # SL101 — Two physical boot chains, ONE shared DMA+VDE production kernel
 
-Initial mapping: 2026-11-10. **Live status updated 2026-11-11**: .106 successfully booted the four-patch CMA kernel first, then was deliberately flashed to the minus-CMA benchmark control and successfully rebooted again. .100 remains on stock because its battery is actively discharging despite AC detected; the four-patch CMA target and matching modules are staged on its SD. See docs/sl101-106-minus-cma-deployment-20261111.md and docs/sl101-100-cma-staged-low-battery-20261111.md.
+Initial mapping: 2026-11-10. **Live status updated 2026-11-11 09:32 CET**: .106 runs the normally booted minus-CMA benchmark control. On .100 power recovered (Charging, 60%, +906mA) and the exact four-patch CMA kernel was physically flashed to the active 8-MiB eMMC LNX with full readback and a second stock rollback backup, but the remote reboot was blocked by an execution safety gate. Therefore .100 **still runs stock until the operator manually reboots**; the *persistent LNX is already CMA*. See docs/sl101-100-cma-flash-readback-reboot-pending-20261111.md and docs/sl101-106-minus-cma-deployment-20261111.md.
 The prior inference that the Nura device always returns to the ASUS stock
 bootloader after a cold reboot is **unproven and must not be used to plan
 deployment or recovery**.
@@ -16,7 +16,7 @@ deployment or recovery**.
 | Internal eMMC | mmcblk0; CID 7001004d4d43333247447e682c336e00 | mmcblk0; CID 7001004d4d43333247448d402a656e00 |
 | External microSD | mmcblk1; CID 03534453553332478030be3f6400b900 | mmcblk1; CID 035344534c31323880ac79a543010300 |
 | Running Linux root | microSD /dev/mmcblk1p1 (ext4) | microSD /dev/mmcblk1p1 (ext4) |
-| Running kernel (2026-11-11 latest) | **7.0.1-postmarketos-grate (stock; CMA modules staged, LNX unmodified due to discharging 22% battery)** | **7.0.1-postmarketos-grate-dmavde1-minus-cma (3-patch benchmark control; authenticated new boot ID 2459039c-a4d8-4cdb-9128-dd3b3061f771)** |
+| Running kernel (2026-11-11 latest) | **7.0.1-postmarketos-grate (stock, pending MANUAL reboot)**; persistent eMMC LNX already **7.0.1-postmarketos-grate-dmavde1 (4 patches, SHA-256 33c5d819...)**, 587 modules installed and rollback verified | **7.0.1-postmarketos-grate-dmavde1-minus-cma (3-patch benchmark control; authenticated new boot ID 2459039c-a4d8-4cdb-9128-dd3b3061f771)** |
 | SD /boot/extlinux default | Debian-EC-current | **sl101-stock-rescue** (recovery, NOT controlling normal eMMC-LNX boot) |
 
 Important: U-Boot or ASUS bootloader **on eMMC** is not the same as the

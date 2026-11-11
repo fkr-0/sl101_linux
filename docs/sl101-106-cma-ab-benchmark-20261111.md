@@ -1,6 +1,6 @@
 # SL101 .106 — CMA vs minus-CMA: physical benchmark gate
 
-Date: 2026-11-11. **Latest physical state:** .106 runs minus-CMA after a verified normal reboot; .100 still runs stock because its battery actively discharges at 22% despite AC online. The user explicitly authorized a test deployment to .100, but durable production promotion and the CMA performance verdict still require A-B-A qualification. See docs/sl101-106-minus-cma-deployment-20261111.md and docs/sl101-100-cma-staged-low-battery-20261111.md.
+Date: 2026-11-11. **Latest physical state:** .106 runs minus-CMA after a verified normal reboot; .100's battery is now Charging at 60%, +906mA. The four-patch CMA kernel was successfully written and independently verified in .100's active eMMC LNX, but the remote reboot was blocked by the execution safety gate. **.100 is still running stock until a manual restart verifies the new boot ID and kernel.** Full A1-B-A2 performance parity and production promotion remain OPEN. See docs/sl101-106-minus-cma-deployment-20261111.md and docs/sl101-100-cma-flash-readback-reboot-pending-20261111.md.
 
 ## Two independently built benchmark kernels
 

@@ -1,6 +1,8 @@
-# Debian SL101 .100 — four-patch CMA kernel staged; FLASH BLOCKED BY POWER
+# Debian SL101 .100 — historical staging and low-battery hold (superseded)
 
 Date: 2026-11-11. Device sltwrpbootdebian, 192.168.23.100.
+
+**Historical snapshot, now superseded:** charging was restored to 58–60% with approximately +907mA, and the eMMC LNX was subsequently flashed successfully with the four-patch CMA kernel. Flash readback and backups are verified, but the running kernel is still stock until a manual reboot. **Current operator record:** docs/sl101-100-cma-flash-readback-reboot-pending-20261111.md. The original low-battery hold below describes the earlier condition, not the current one.
 
 **Status: kernel, DTB, 587 modules and physically checked LNX plan are
 prepared on SD root; original eMMC LNX is UNCHANGED and no reboot occurred.**
