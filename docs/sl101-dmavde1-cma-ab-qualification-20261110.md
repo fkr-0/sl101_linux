@@ -1,7 +1,10 @@
 # SL101 7.0.1: CMA A/B release-candidate pair
 
-**Date:** 2026-11-10. **Scope:** host builds, independent A/B proof, no live
-device mutation.
+**Built:** 2026-11-10. **Live update:** 2026-11-11: full four-patch RC
+flashed to .106, normal reboot and service availability verified.
+The independent minus-CMA benchmark remains host-only and **was not
+installed**. Source isolation and host A/B comparison remain valid.
+See docs/sl101-106-dmavde1-flash-20261111.md.
 
 ## Artifact identities
 
@@ -104,7 +107,7 @@ module paths and **identical DTB SHA-256**:
 | Portable archive SHA-256 | `d7781381ee52efb3be6edf885857b2800a4e1e00ce989a63a00955035183d8dc` | `774931dae8224afb78bd2f38272bcfbe6496f3b8db86b600fb26d81f208e4c3d` |
 | Full module inventory | 587 | 587 |
 | Patch count | 4 | 3 (CMA excluded) |
-| Kernel and hardware status | Built, not boot-tested | Built, not boot-tested |
+| Kernel and hardware status | **.106 flashed: exact four-patch RC normal boot verified; no graphics/CMA performance verdict** | Built; **not installed or boot-tested** |
 
 The benchmark archive is:
 
@@ -132,11 +135,14 @@ solely on the A/B result.
 
 ## Benchmarks for the two *hardware* identities
 
-Run only after both kernel boot mechanisms and rollback are separately
-qualified: **.100 is ASUS LNX/eMMC with Debian/microSD root; .106 is
-native eMMC U-Boot with Nura/microSD root**. Do NOT execute a blind
-`kexec`, touch the live Sway DRM master, or interpret the SD
-`/boot/extlinux.conf` as proven to be the Nura default.
+Run alternating A/B hardware tests only after both recovery procedures
+are separately qualified: **.100 has ASUS LNX/eMMC and Debian/microSD
+root; .106 has an experimentally confirmed active eMMC Android-header
+LNX kernel container with Nura/microSD root** (the precise first-stage
+bootloader identity remains distinct/uncertain). The .106 full four-patch
+RC has booted once; minus-CMA has not been deployed. Do NOT execute
+blind `kexec`, take over the live Sway DRM master, or treat SD
+`/boot/extlinux.conf` as the normal eMMC boot selector.
 
 Use controlled alternating sequences (ABBA or BAAB) **per tablet** with
 physical recovery and identical CPU clock, device temperature, AC power,

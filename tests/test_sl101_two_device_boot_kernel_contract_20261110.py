@@ -33,7 +33,8 @@ class SL101DualBootContractTests(unittest.TestCase):
         self.assertIn("microSD /dev/mmcblk1p1", data)
         self.assertIn("not the same as the", data)
         self.assertIn("eMMC", data)
-        self.assertIn("actual selected kernel file still to be demonstrated", data)
+        self.assertIn("Confirmed active 8-MiB Android-header eMMC LNX", data)
+        self.assertIn("7.0.1-postmarketos-grate-dmavde1", data)
 
     def test_pinned_physical_identities_stay_distinct(self):
         text = CANON.read_text()
@@ -89,9 +90,20 @@ class SL101DualBootContractTests(unittest.TestCase):
         for s in (
             "8,912,896", "8,388,608", "14-MiB",
             "LNX+BAK+GP1", "DTB", "Sway/WayVNC",
-            "Editing /boot/extlinux alone is insufficient proof.",
+            "The SD extlinux default does not determine that normal boot.",
         ):
             self.assertIn(s, text)
+
+    def test_106_live_flash_receipt_is_not_mistaken_for_full_qualification(self):
+        receipt = (ROOT / "docs/sl101-106-dmavde1-flash-20261111.md").read_text()
+        self.assertIn("successful normal reboot", receipt)
+        self.assertIn("7.0.1-postmarketos-grate-dmavde1", receipt)
+        self.assertIn("587", receipt)
+        self.assertIn("LNX", receipt)
+        self.assertIn("GPU fresh-buffer/pixel", receipt)
+        self.assertIn("minus-CMA", receipt)
+        self.assertIn("e0ff1939d5de4316375e373d847363d74195f6377f29b83073138a6a62d5f73c", receipt)
+        self.assertIn("6aa6ea687edf6a78103b2df12505263c9d6436cd193815c31092541d30faedf0", receipt)
 
     def test_outdated_cold_boot_assumption_is_explicitly_superseded(self):
         current = CANON.read_text()

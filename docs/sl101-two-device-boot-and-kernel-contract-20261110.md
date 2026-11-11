@@ -1,6 +1,6 @@
 # SL101 — Two physical boot chains, ONE shared DMA+VDE production kernel
 
-Date: 2026-11-10. This is the **canonical current operator/device mapping**.
+Initial mapping: 2026-11-10. **Live .106 flash/reboot update: 2026-11-11**. This is the canonical operator/device mapping; see docs/sl101-106-dmavde1-flash-20261111.md for the actual eMMC LNX write, backups and successful boot.
 The prior inference that the Nura device always returns to the ASUS stock
 bootloader after a cold reboot is **unproven and must not be used to plan
 deployment or recovery**.
@@ -12,25 +12,29 @@ deployment or recovery**.
 | SSH/hostname | user@192.168.23.100 / sltwrpbootdebian | user@192.168.23.106 / sl101-nura |
 | Distribution | Debian 13, glibc | Nura/postmarketOS Alpine, musl |
 | Bootloader | Original ASUS/Android bootloader, RootBind-style LNX kernel boot | Native U-Boot in internal eMMC (owner's device identification and project notes) |
-| Kernel installation route | ASUS LNX Android-header 8-MiB eMMC slot | U-Boot kernel + DTB; actual selected kernel file still to be demonstrated |
+| Kernel installation route | ASUS LNX Android-header 8-MiB eMMC slot | **Confirmed active 8-MiB Android-header eMMC LNX slot**, stock and RC zImage+DTB physically read back; first-stage loader identity still unresolved |
 | Internal eMMC | mmcblk0; CID 7001004d4d43333247447e682c336e00 | mmcblk0; CID 7001004d4d43333247448d402a656e00 |
 | External microSD | mmcblk1; CID 03534453553332478030be3f6400b900 | mmcblk1; CID 035344534c31323880ac79a543010300 |
 | Running Linux root | microSD /dev/mmcblk1p1 (ext4) | microSD /dev/mmcblk1p1 (ext4) |
-| Current running kernel | 7.0.1-postmarketos-grate | 7.0.1-postmarketos-grate |
-| SD /boot/extlinux default | Debian-EC-current | dmafix1-prod-candidate, NOT the active kernel |
+| Running kernel (2026-11-11) | 7.0.1-postmarketos-grate (stock) | **7.0.1-postmarketos-grate-dmavde1 (four-patch RC), authenticated after reboot** |
+| SD /boot/extlinux default | Debian-EC-current | **sl101-stock-rescue** (recovery, NOT controlling normal eMMC-LNX boot) |
 
 Important: U-Boot or ASUS bootloader **on eMMC** is not the same as the
 root filesystem **on eMMC**. Kernel command line, findmnt, MMC device types,
 CIDs and root source currently establish **microSD root on both tablets**.
-The .106 permanent/native U-Boot bootloader is an operator identity plus
-historical project evidence, but Linux shell state alone does not prove
-the U-Boot search path or currently loaded kernel image source.
+The .106 permanent/native U-Boot bootloader remains an operator identity
+plus historical project evidence: **its precise first-stage loader identity
+is not independently established**. The currently selected **kernel-bearing
+8-MiB eMMC LNX path, however, IS confirmed** by exact readback of stock
+zImage/DTB and a successful normal reboot after replacing that container.
+See docs/sl101-106-dmavde1-flash-20261111.md. This does not show that the
+ordinary boot reads the SD extlinux menu.
 
 Both observed running kernel configurations from /proc/config.gz have
 identical SHA-256:
 6b09863a5f4356ce615f7d5d4cdecbba4cd2cc208c34125954af9534648f9248.
 
-### What the .106 reboot actually establishes
+### Historical .106 RC2 reboot (before the successful 2026-11-11 flash)
 
 The SD file /boot/extlinux/extlinux.conf has
 default dmafix1-prod-candidate; the staged kernel exists at
@@ -43,10 +47,11 @@ Nevertheless the **running** kernel after the operator's cold reboot is
 794a3766aed121654aed5b88f3a8d826f38b47fa4fcfb5bb01d3267518a0d9e1.
 The old stock kernel was loaded; this does **not** prove the candidate
 kernel is buggy or even that U-Boot consulted the edited SD extlinux file.
-The earlier kexec timeout was not a proven panic. Determine the current
-U-Boot bootmethod and actual kernel source using console/boot-environment
-evidence before touching the persistent default. Do not assume that a
-successful file write to SD extlinux changes the real native-U-Boot default.
+The earlier kexec timeout was not a proven panic. Subsequently the
+**physical 8-MiB eMMC LNX kernel container was identified and verified**;
+the four-patch RC was installed there and successfully booted on 2026-11-11.
+The SD extlinux default does not determine that normal boot. See the
+live flash report for actual kernel hashes, verified backups and recovery.
 
 Earlier statements in docs/sl101-dmafix1-prod-candidate-boot-20261110.md
 about a universal .106 vendor-stock cold-boot recovery path were
@@ -111,16 +116,20 @@ The cached CAPTURE optimization may be separately qualified as a
 future optional addition; generic CMA remapping requires its own
 evidence. A final product release needs explicit source-patch freeze.
 
-## Packaging / qualification, not yet performed
+## Installation status and remaining qualification (updated 2026-11-11)
 
 - .100: wrap the shared kernel in the **exact ASUS Android-header
   8-MiB LNX slot** (with correct DTB and bootargs), preserve current
   original 8-MiB LNX and adjacent partition hashes, stage matching
   modules on Debian SD, confirm physical APX recovery first.
-- .106: preserve permanent eMMC U-Boot, discover the actually consulted
-  boot menu / extlinux / boot.scr / eMMC kernel target, stage the same
-  kernel/compatible DTB there with a selectable recovery, stage matching
-  modules on Nura SD. Editing /boot/extlinux alone is insufficient proof.
+- .106: **DONE for four-patch RC boot**. The operative eMMC LNX 8-MiB
+  kernel container was identified from the exact stock zImage+DTB;
+  full RC zImage+DTB flashed within its bounds and read back; adjacent
+  SOS/BAK/GP1 verified unchanged; all 587 modules installed on Nura SD.
+  After normal reboot, uname -r and boot ID independently prove the RC
+  is running, with Sway, NuraLoumi and WayVNC active. The SD extlinux
+  default was made the known-good stock rescue, NOT the normal boot selector.
+  VDE stream, GPU pixels and CMA performance still require qualification.
 - On **each** tablet after an explicitly authorized boot, compare
   uname -r, running config, DTB, VDE vermagic/CRC/module SHA and the
   full module manifest; validate Wi-Fi, EC, input, video, Sway/WayVNC
@@ -129,5 +138,7 @@ evidence. A final product release needs explicit source-patch freeze.
 - Repeat a normal power-on cold boot on **both** independently; only
   then promote from candidate to production.
 
-No flashes, boot default changes, reboots, kexec or media workloads
-were performed while writing this reconciliation.
+Historical note: this original 2026-11-10 reconciliation itself involved
+no device writes. The **separately authorized live .106 flash and reboot
+were executed and verified on 2026-11-11**, documented in
+sl101-106-dmavde1-flash-20261111.md. Device .100 was not changed.
