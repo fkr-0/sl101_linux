@@ -19,6 +19,9 @@ services:
       DEPLOY_PROFILE: unset
       SL101_CUTOVER: "${SL101_CUTOVER:-NO}"
       SL101_APPLY: "${SL101_APPLY:-NO}"
+      SL101_NURALOUMI_SHA: "${SL101_NURALOUMI_SHA:-}"
+      SL101_NURALOUMI_RUN_ID: "${SL101_NURALOUMI_RUN_ID:-}"
+      SL101_NURALOUMI_STAGE: "${SL101_NURALOUMI_STAGE:-NO}"
     volumes:
       - ../../:/workspace:ro
       - ./inventory:/inventory:ro

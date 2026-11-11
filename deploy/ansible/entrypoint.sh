@@ -11,6 +11,37 @@ case "${DEPLOY_TARGET:-unset}:${DEPLOY_PROFILE:-unset}" in
   *) echo 'missing or invalid Compose target/profile override' >&2; exit 64 ;;
 esac
 case "$1" in
+  nuraloumi-check|nuraloumi-stage)
+    [ "$DEPLOY_TARGET:$DEPLOY_PROFILE" = sl101-nura:nura ] || {
+      echo 'NuraLoumi CI staging is exclusive to .106 Alpine (never .100 Debian)' >&2
+      exit 65
+    }
+    case "${SL101_NURALOUMI_SHA:-}" in
+      *[!0123456789abcdef]*|'') echo 'require exact lowercase 40-character CI Git SHA' >&2; exit 65;;
+    esac
+    [ "${#SL101_NURALOUMI_SHA}" -eq 40 ] || {
+      echo 'require full 40-character CI SHA' >&2; exit 65
+    }
+    case "${SL101_NURALOUMI_RUN_ID:-}" in
+      *[!0123456789]*|'') echo 'require exact positive CI run ID' >&2; exit 65;;
+    esac
+    [ "$SL101_NURALOUMI_RUN_ID" -gt 0 ] || exit 65
+    if [ "$1" = nuraloumi-stage ]; then
+      [ "${SL101_APPLY:-NO}" = YES ] &&
+      [ "${SL101_NURALOUMI_STAGE:-NO}" = YES ] || {
+        echo 'stage requires BOTH SL101_APPLY=YES and SL101_NURALOUMI_STAGE=YES' >&2
+        exit 65
+      }
+      set -- --diff
+    else
+      set -- --check --diff
+    fi
+    cd /workspace
+    exec ansible-playbook -i /inventory/hosts.yml \
+      deploy/ansible/playbooks/nuraloumi-stage.yml --limit sl101-nura "$@"
+    ;;
+esac
+case "$1" in
   check) set -- --check --diff ;;
   apply)
     [ "${SL101_APPLY:-NO}" = YES ] || { echo 'apply requires SL101_APPLY=YES' >&2; exit 65; }

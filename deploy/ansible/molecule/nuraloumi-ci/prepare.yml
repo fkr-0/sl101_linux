@@ -1,0 +1,29 @@
+---
+- name: Create synthetic standalone ARMHF test fixture, never a real CI package
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    repo: "{{ (playbook_dir ~ '/../../../..') | realpath }}"
+    sandbox: "{{ lookup('ansible.builtin.env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}"
+  tasks:
+    - name: Produce synthetic ELF32 fixture only in Molecule temp
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ repo }}/tests/test_sl101_nuraloumi_ci_deploy_20261111.py"
+          - --fixture
+          - "{{ sandbox }}/payload"
+      changed_when: false
+
+    - name: Keep a known-good simulated active binary target
+      ansible.builtin.file:
+        path: "{{ sandbox }}/fake-device/opt/nuraloumi/known-good"
+        state: directory
+        mode: "0755"
+
+    - name: Model the active current symlink as never to be modified by staging
+      ansible.builtin.file:
+        path: "{{ sandbox }}/fake-device/opt/nuraloumi/current"
+        src: "{{ sandbox }}/fake-device/opt/nuraloumi/known-good"
+        state: link

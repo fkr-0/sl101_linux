@@ -1,0 +1,16 @@
+---
+- name: Stage declared binaries using REAL tasks in localhost fake root
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    sandbox: "{{ lookup('ansible.builtin.env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}"
+    nura_ci_sha: "ffffffffffffffffffffffffffffffffffffffff"
+    nura_ci_run: "1234567"
+    nura_ci_payload: "{{ sandbox }}/payload"
+    nura_install_base: "{{ sandbox }}/fake-device/opt/nuraloumi"
+    nura_release_root: "{{ nura_install_base }}/releases/{{ nura_ci_sha }}"
+    sl101_molecule: true
+  tasks:
+    - name: Reuse identical staging tasks, with sudo and tablet bypass disabled
+      ansible.builtin.include_tasks: ../../playbooks/nuraloumi-stage-tasks.yml

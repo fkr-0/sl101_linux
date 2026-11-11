@@ -1,0 +1,15 @@
+---
+# Fully offline fake-root qualification: no CI download, no SSH, no sudo.
+dependency:
+  name: galaxy
+  options:
+    role-file: /dev/null
+    requirements-file: /dev/null
+driver:
+  name: default
+platforms:
+  - name: localhost
+    ansible_connection: local
+scenario:
+  name: nuraloumi-ci
+  test_sequence: [syntax, prepare, converge, idempotence, verify]

@@ -1,0 +1,137 @@
+---
+- name: Read controller's exact full manifest (no command execution)
+  ansible.builtin.set_fact:
+    nura_manifest_text: "{{ lookup('ansible.builtin.file', nura_ci_payload ~ '/release/MANIFEST.txt') }}"
+  changed_when: false
+
+- name: Determine only the manifest-declared canonical binaries
+  ansible.builtin.set_fact:
+    nura_ci_binaries: >-
+      {{
+        (nura_manifest_text | regex_findall('(?m)^binaries=([^\n]+)$') | first).split(',')
+      }}
+  changed_when: false
+
+- name: Reject incomplete or unexpected release surface
+  ansible.builtin.assert:
+    that:
+      - nura_ci_binaries | length >= 24
+      - nura_ci_binaries | unique | list | length == nura_ci_binaries | length
+      - "'nuraloumi-panel' in nura_ci_binaries"
+      - "'nuraloumi-viewer' in nura_ci_binaries"
+      - "'nuraloumi-files' in nura_ci_binaries"
+      - "'nuraloumi-run' in nura_ci_binaries"
+      - "'nuraloumi-sway-workspace-switcher' in nura_ci_binaries"
+
+- name: Refuse symlinked active release and staging parents
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop:
+    - "{{ nura_install_base }}"
+    - "{{ nura_install_base }}/releases"
+    - "{{ nura_release_root }}"
+    - "{{ nura_release_root }}/bin"
+  register: nura_parent_stats
+  changed_when: false
+
+- name: Validate staging parents are real directories, never symlinks
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or (item.stat.isdir and not item.stat.islnk)
+    fail_msg: "Refusing unexpected symlink or non-directory in /opt/nuraloumi staging tree."
+  loop: "{{ nura_parent_stats.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Create only inactive release directories
+  become: "{{ not (sl101_molecule | default(false) | bool) }}"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ omit if (sl101_molecule | default(false) | bool) else 'root' }}"
+    group: "{{ omit if (sl101_molecule | default(false) | bool) else 'root' }}"
+    mode: "0755"
+  loop:
+    - "{{ nura_install_base }}"
+    - "{{ nura_install_base }}/releases"
+    - "{{ nura_release_root }}"
+    - "{{ nura_release_root }}/bin"
+
+- name: Stage only exact CI-verified ARMv7 musl executables
+  become: "{{ not (sl101_molecule | default(false) | bool) }}"
+  ansible.builtin.copy:
+    src: "{{ nura_ci_payload }}/release/bin/{{ item }}"
+    dest: "{{ nura_release_root }}/bin/{{ item }}"
+    owner: "{{ omit if (sl101_molecule | default(false) | bool) else 'root' }}"
+    group: "{{ omit if (sl101_molecule | default(false) | bool) else 'root' }}"
+    mode: "0755"
+    follow: false
+  loop: "{{ nura_ci_binaries }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Stage controller-generated checksums and original CI manifest
+  become: "{{ not (sl101_molecule | default(false) | bool) }}"
+  ansible.builtin.copy:
+    src: "{{ nura_ci_payload }}/release/{{ item }}"
+    dest: "{{ nura_release_root }}/{{ item }}"
+    owner: "{{ omit if (sl101_molecule | default(false) | bool) else 'root' }}"
+    group: "{{ omit if (sl101_molecule | default(false) | bool) else 'root' }}"
+    mode: "0644"
+    follow: false
+  loop: [MANIFEST.txt, SHA256SUMS.bin]
+
+- name: Stage audited CI provenance without writing into boot or active symlinks
+  become: "{{ not (sl101_molecule | default(false) | bool) }}"
+  ansible.builtin.copy:
+    src: "{{ nura_ci_payload }}/{{ item }}"
+    dest: "{{ nura_release_root }}/{{ item }}"
+    owner: "{{ omit if (sl101_molecule | default(false) | bool) else 'root' }}"
+    group: "{{ omit if (sl101_molecule | default(false) | bool) else 'root' }}"
+    mode: "0644"
+    follow: false
+  loop: [CI-PROVENANCE.json, ELF-AUDIT.txt]
+
+- name: Enumerate all staged binaries before acknowledging readiness
+  ansible.builtin.find:
+    paths: "{{ nura_release_root }}/bin"
+    recurse: false
+    file_type: any
+  register: nura_staged_entries
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Refuse unexpected stale or symlinked entries in inactive release
+  ansible.builtin.assert:
+    that:
+      - nura_staged_entries.matched == nura_ci_binaries | length
+      - >-
+        nura_staged_entries.files | map(attribute='path') | map('basename') | sort | list
+        == nura_ci_binaries | sort | list
+      - nura_staged_entries.files | selectattr('islnk') | list | length == 0
+    fail_msg: "Staged release contains unverified extra files/symlinks; do not mark ready."
+  when: not ansible_check_mode
+
+- name: Verify exact remote installed bytes before marking staging ready
+  become: "{{ not (sl101_molecule | default(false) | bool) }}"
+  ansible.builtin.command:
+    argv: [sha256sum, --strict, --check, SHA256SUMS.bin]
+    chdir: "{{ nura_release_root }}"
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Mark only the verified inactive release ready for later supervised promotion
+  become: "{{ not (sl101_molecule | default(false) | bool) }}"
+  ansible.builtin.copy:
+    dest: "{{ nura_release_root }}/CI-READY"
+    content: |
+      NURALOUMI_CI_READY=true
+      GIT_SHA={{ nura_ci_sha }}
+      RUN_ID={{ nura_ci_run }}
+      ABI=armv7-unknown-linux-musleabihf
+      ACTIVATED=false
+    owner: "{{ omit if (sl101_molecule | default(false) | bool) else 'root' }}"
+    group: "{{ omit if (sl101_molecule | default(false) | bool) else 'root' }}"
+    mode: "0644"
+  when: not ansible_check_mode

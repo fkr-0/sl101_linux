@@ -1,0 +1,108 @@
+---
+# Only .106: a copy-only, versioned CI binary stage. Neither /opt/nuraloumi/current
+# nor any active Sway/session executable is changed. No APK key enrollment.
+- name: Guarded CI-only NuraLoumi staging on SL101 Alpine .106
+  hosts: sl101-nura
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    nura_ci_sha: "{{ lookup('ansible.builtin.env', 'SL101_NURALOUMI_SHA', default='') }}"
+    nura_ci_run: "{{ lookup('ansible.builtin.env', 'SL101_NURALOUMI_RUN_ID', default='') }}"
+    nura_ci_payload: "/data/nuraloumi/{{ nura_ci_sha }}"
+    nura_install_base: /opt/nuraloumi
+    nura_release_root: "{{ nura_install_base }}/releases/{{ nura_ci_sha }}"
+  pre_tasks:
+    - name: Require exact host, no selector expansion and explicit successful build identity
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'sl101-nura'
+          - ansible_play_hosts_all | length == 1
+          - ansible_host == '192.168.23.106'
+          - nura_ci_sha is match('^[a-f0-9]{40}$')
+          - nura_ci_run is match('^[1-9][0-9]*$')
+          - nura_ci_sha == nuraloumi_approved_git_sha
+          - nura_ci_run == nuraloumi_approved_ci_run
+          - nura_install_base == '/opt/nuraloumi'
+          - not (sl101_molecule | default(false) | bool)
+        fail_msg: "Refusing unknown host, expanded inventory, or non-exact CI provenance."
+
+    - name: Verify all 24 CI binaries, manifest, ELF ABI and provenance on controller
+      ansible.builtin.command:
+        argv:
+          - python3
+          - /workspace/deploy/ansible/tools/nuraloumi_ci_payload.py
+          - verify
+          - --root
+          - "{{ nura_ci_payload }}"
+          - --sha
+          - "{{ nura_ci_sha }}"
+          - --run-id
+          - "{{ nura_ci_run }}"
+          - --expected-tar-sha
+          - "{{ nuraloumi_approved_tar_sha256 }}"
+          - --expected-manifest-sha
+          - "{{ nuraloumi_approved_manifest_sha256 }}"
+      delegate_to: localhost
+      become: false
+      check_mode: false
+      changed_when: false
+
+    - name: Inspect the physical .106 eMMC/SD CIDs, SD root and running kernel (read-only)
+      ansible.builtin.raw: |
+        printf 'HOST=%s\n' "$(hostname)"
+        printf 'EMMC_CID=%s\n' "$(cat /sys/block/mmcblk0/device/cid)"
+        printf 'SD_CID=%s\n' "$(cat /sys/block/mmcblk1/device/cid)"
+        printf 'ROOT=%s\n' "$(findmnt -n -o SOURCE /)"
+        printf 'KERNEL=%s\n' "$(uname -r)"
+        . /etc/os-release
+        printf 'OS_ID=%s\n' "$ID"
+      register: nura_identity
+      changed_when: false
+      check_mode: false
+
+    - name: Refuse mismatch, unavailable provenance or incorrect distribution
+      ansible.builtin.assert:
+        that:
+          - ('HOST=' ~ expected_hostname) in nura_identity.stdout_lines
+          - ('EMMC_CID=' ~ expected_emmc_cid) in nura_identity.stdout_lines
+          - ('SD_CID=' ~ expected_sd_cid) in nura_identity.stdout_lines
+          - ('ROOT=' ~ expected_root_source) in nura_identity.stdout_lines
+          - ('KERNEL=' ~ expected_kernel_release) in nura_identity.stdout_lines
+          - "'OS_ID=alpine' in nura_identity.stdout_lines"
+        fail_msg: >-
+          Physical .106 identity, kernel or SD root does not match the
+          2026-11-11 receipt. Refusing staged deployment without a new review.
+
+    - name: Check SD-backed /opt capacity before making a second complete release
+      ansible.builtin.raw: "df -Pk /opt | awk 'NR==2 { print $4 }'"
+      register: nura_free_sd_kib
+      changed_when: false
+      check_mode: false
+
+    - name: Refuse staging with less than 90 MiB available on the root SD
+      ansible.builtin.assert:
+        that:
+          - nura_free_sd_kib.stdout | trim | int >= 92160
+        fail_msg: >-
+          Not enough free SD space for side-by-side NuraLoumi CI staging.
+          Do not delete the running version or disable rollback to make room.
+
+    - name: Require explicit mutation gate for a stage (never implicit from site.yml)
+      ansible.builtin.assert:
+        that:
+          - ansible_check_mode or
+            (lookup('ansible.builtin.env', 'SL101_APPLY', default='NO') == 'YES'
+             and lookup('ansible.builtin.env', 'SL101_NURALOUMI_STAGE', default='NO') == 'YES')
+        fail_msg: "Use an explicit nuraloumi-stage with BOTH gate environment variables."
+
+  tasks:
+    - name: Plan or stage CI-verified NuraLoumi without activating the desktop
+      ansible.builtin.include_tasks: nuraloumi-stage-tasks.yml
+
+  post_tasks:
+    - name: Explain safe next step (no current-pointer or compositor changes)
+      ansible.builtin.debug:
+        msg: >-
+          NuraLoumi CI {{ nura_ci_sha }} has been {{ 'PREVIEWED only' if ansible_check_mode
+          else 'STAGED without activation' }} on .106 at {{ nura_release_root }}.
+          Current Sway, panel, /opt/nuraloumi/current, boot and Mesa are unchanged.

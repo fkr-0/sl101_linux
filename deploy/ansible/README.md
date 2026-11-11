@@ -90,10 +90,58 @@ The device-side read-only preflight is separate:
 
     ansible-playbook -i deploy/ansible/inventory/hosts.yml deploy/ansible/playbooks/hardware-preflight.yml --limit sl101-nura
 
-The new kernel is **host-verified but NOT device-qualified**; the CMA
-alias patch is still experimental. Previous RC2 was already staged and
-its one-shot .106 boot outcome is unresolved; preserve its rollback.
+The earlier RC2 one-shot test was inconclusive. As of 2026-11-11,
+the complete four-patch dmavde1 candidate has been physically flashed to
+.106's actual eMMC LNX slot and authenticated after a normal reboot.
+This proves bootability, NOT GPU/CMA performance, video, suspend or
+unconditional production safety; preserve the verified boot rollback.
 No kernel staging/reboot/flash is included in the current playbooks.
+
+## CI-only NuraLoumi 0.0.4-dev.2 stage for .106
+
+The separate playbook 'playbooks/nuraloumi-stage.yml' is independent of
+the unqualified public comma-command cutover. It does NOT change the
+active session or boot. Latest 2026-11-11 hardware evidence confirms the
+.106 kernel boots from its eMMC LNX slot, but the Alpine ROOT remains
+microSD /dev/mmcblk1p1. Both identities are checked; do not confuse them.
+
+Prepare only the exact successful GitHub CI musl artifact on the host:
+
+    python3 deploy/ansible/tools/nuraloumi_ci_payload.py prepare \
+      --nuraloumi-repo /home/user/code/nuraloumi \
+      --out-root deploy/ansible/data/nuraloumi \
+      --sha 6d4f7b2d728db3251d244bdebf38dc6e415856f5 \
+      --run-id 42927406671
+
+The tool invokes the sibling GitHub exact-run verifier and validates
+all 24 binary ELF32 ARM hard-float files, the full tar manifest and
+individual checksums before publishing in ignored data/nuraloumi/<sha>.
+The CI source SHA, run ID, tar digest and manifest digest are pinned in
+the reviewed inventory, not supplied merely by an untrusted JSON file.
+
+Read-only identity + staging preview (requires authenticated SSH to .106):
+
+    export SL101_NURALOUMI_SHA=6d4f7b2d728db3251d244bdebf38dc6e415856f5
+    export SL101_NURALOUMI_RUN_ID=42927406671
+    docker compose -f deploy/ansible/compose.yaml \
+      -f deploy/ansible/compose.nura.yaml run --rm deploy nuraloumi-check
+
+Staging-only write after explicit operator review (no activation):
+
+    SL101_APPLY=YES SL101_NURALOUMI_STAGE=YES \
+      docker compose -f deploy/ansible/compose.yaml \
+        -f deploy/ansible/compose.nura.yaml run --rm deploy nuraloumi-stage
+
+This installs binaries to /opt/nuraloumi/releases/<sha>/bin and verifies
+remote SHA256 before marking CI-READY. It does NOT update current,
+install an APK or key, replace /usr/local/bin binaries, restart a panel,
+modify Sway/Mesa/WayVNC, or change the kernel.
+
+Current launcher uses /opt/nuraloumi/current/nuraloumi-panel (rather
+than current/bin/panel). Any future separately authorized promotion
+must point current to releases/<sha>/bin, preserve the previous active
+release, and handle the Sway workspace-switcher in /usr/local/bin.
+See docs/sl101-106-nuraloumi-ci-ansible-20261111.md.
 
 ## Remaining porting
 

@@ -1,0 +1,40 @@
+---
+- name: Assert idempotent 24-binary staged release and preserved live pointer
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    sandbox: "{{ lookup('ansible.builtin.env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}"
+    sha: "ffffffffffffffffffffffffffffffffffffffff"
+    root: "{{ sandbox }}/fake-device/opt/nuraloumi"
+    release: "{{ root }}/releases/{{ sha }}"
+  tasks:
+    - name: Confirm the previously active symlink points to known-good
+      ansible.builtin.stat:
+        path: "{{ root }}/current"
+        follow: false
+      register: current
+
+    - name: Require untouched active symlink
+      ansible.builtin.assert:
+        that:
+          - current.stat.islnk
+          - current.stat.lnk_source == root ~ '/known-good'
+
+    - name: Verify remote-style staged checksums match exact fake manifest
+      ansible.builtin.command:
+        argv: [sha256sum, --strict, --check, SHA256SUMS.bin]
+        chdir: "{{ release }}"
+      changed_when: false
+
+    - name: Inspect all 24 staged binaries
+      ansible.builtin.find:
+        paths: "{{ release }}/bin"
+        file_type: file
+      register: binaries
+
+    - name: Require complete inactive stage and READY marker
+      ansible.builtin.assert:
+        that:
+          - binaries.matched == 24
+          - lookup('ansible.builtin.file', release ~ '/CI-READY') is search('ACTIVATED=false')

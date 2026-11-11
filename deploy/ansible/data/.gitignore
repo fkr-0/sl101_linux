@@ -1,0 +1,4 @@
+# GitHub Actions binaries, credentials, provenance and temporary stage stay local.
+*
+!.gitignore
+!.gitkeep
