@@ -6,6 +6,7 @@ This is NOT a verified player until device pixel and frame-progress gates pass.
 Never changes DRM master, stops Sway, modifies the kernel, or picks a CPU sink.
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -26,6 +27,13 @@ ELEMENTS = ("filesrc", "qtdemux", "queue", "h264parse", "v4l2slh264dec",
             "glupload", "glcolorconvert", "glimagesink")
 GRAPHICS_ENV_KEYS = ("LD_LIBRARY_PATH", "LIBGL_DRIVERS_PATH",
                      "GBM_BACKENDS_PATH", "LD_PRELOAD")
+# The *observed* .106 musl Grate Mesa prefix (not a guessed content-hash name).
+GRATE_PREFIX_106 = "/opt/grate-mesa25-musl-prod70-20261109/lib"
+GRATE_ELF_SHA256 = {
+    "libgallium-25.0.7.so": "be30623c7e753122dc95470a0829802fe9371dbdc93a6a9e081f3159e6d2fa89",
+    "libEGL.so.1.0.0": "ed10793c3186acdd3ff808f13ea6fabc1dcf9daf4d83ae925df5eda3cebb554c",
+    "libGLESv2.so.2.0.0": "9903d65b8cae3621262f225c981277da28d14a46f91a371f9699af62a1f31e61",
+}
 
 
 class GateError(Exception):
@@ -66,7 +74,7 @@ def pipeline_args(path, memory, audio_sink):
     caps = ("video/x-raw(memory:DMABuf),format=DMA_DRM" if memory == "dmabuf"
             else "video/x-raw,format=I420")
     argv = [
-        "gst-launch-1.0", "-e", "-m", "-v", "filesrc", "location=" + str(path),
+        "gst-launch-1.0", "-f", "-e", "-m", "-v", "filesrc", "location=" + str(path),
         "!", "qtdemux", "name=demux",
         "demux.video_0", "!", "queue", "max-size-buffers=3",
         "!", "h264parse", "!", "v4l2slh264dec",
@@ -106,11 +114,11 @@ def validate_compositor_env(values):
     if values.get("LIBGL_ALWAYS_SOFTWARE") or values.get("GALLIUM_DRIVER"):
         raise GateError("active compositor uses or exports a software rendering override")
     for key in GRAPHICS_ENV_KEYS:
-        if not values.get(key) or any(c in values[key] for c in ("\\x00", "\\n", "\\r")):
+        if not values.get(key) or any(c in values[key] for c in ("\x00", "\n", "\r")):
             raise GateError("active compositor missing safe pinned " + key)
     driver = values["LIBGL_DRIVERS_PATH"]
-    if not re.fullmatch(r"/usr/local/lib/sl101-grate-[a-f0-9]{64}/lib", driver):
-        raise GateError("active compositor Grate driver prefix is not content-pinned")
+    if driver != GRATE_PREFIX_106:
+        raise GateError("active compositor does not use the independently observed .106 Grate prefix")
     if values["GBM_BACKENDS_PATH"] != driver + "/gbm":
         raise GateError("GBM backend differs from compositor's pinned Mesa")
     ld_dirs = values["LD_LIBRARY_PATH"].split(":")
@@ -123,6 +131,26 @@ def validate_compositor_env(values):
     return {key: values[key] for key in GRAPHICS_ENV_KEYS}
 
 
+def verify_grate_libraries(prefix):
+    """Require the EXACT live .106 Grate runtime, not merely a promising name."""
+    if prefix != GRATE_PREFIX_106:
+        raise GateError("unqualified Grate library directory")
+    for name, expected_sha in GRATE_ELF_SHA256.items():
+        path = Path(prefix) / name
+        if not path.is_file() or path.is_symlink():
+            raise GateError("missing pinned Grate ELF: " + name)
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if digest != expected_sha:
+            raise GateError("installed Grate ELF SHA256 mismatch: " + name)
+
+
+def parse_proc_environment(raw):
+    """Linux /proc/PID/environ uses NUL-delimited KEY=VALUE pairs."""
+    entries = (item.split(b"=", 1) for item in raw.split(b"\x00") if b"=" in item)
+    return {key.decode("utf-8", "surrogateescape"):
+            value.decode("utf-8", "surrogateescape") for key, value in entries}
+
+
 def compositor_gpu_environment(pid):
     """Read the observed renderer of the owned, trusted Sway process."""
     try:
@@ -132,10 +160,10 @@ def compositor_gpu_environment(pid):
         if os.readlink(proc / "exe") != "/usr/local/bin/sl101-sway":
             raise GateError("unrecognized desktop Sway executable")
         raw = (proc / "environ").read_bytes()
-        entries = (s.split(b"=", 1) for s in raw.split(b"\\x00") if b"=" in s)
-        values = {k.decode("utf-8", "surrogateescape"):
-                  v.decode("utf-8", "surrogateescape") for k, v in entries}
-        return validate_compositor_env(values)
+        values = parse_proc_environment(raw)
+        graphics = validate_compositor_env(values)
+        verify_grate_libraries(graphics["LIBGL_DRIVERS_PATH"])
+        return graphics
     except (OSError, ValueError) as exc:
         raise GateError("cannot attest running GPU Sway environment") from exc
 
@@ -160,7 +188,9 @@ def preflight(path, audio_sink):
         raise GateError("run unprivileged as the active Sway user")
     if not Path("/dev/video0").exists() or not Path("/dev/dri/card0").exists():
         raise GateError("VDE or DRM node missing")
-    runtime = os.environ.get("XDG_RUNTIME_DIR", "/run/sl101-desktop-user")
+    # SSH/pam can set a different runtime dir than the *existing* Sway seat.
+    # This launcher targets only the verified .106 system desktop runtime.
+    runtime = "/run/sl101-desktop-user"
     root = Path(runtime)
     if not root.is_absolute() or root.is_symlink() or not root.is_dir():
         raise GateError("invalid Wayland runtime directory")
@@ -215,14 +245,16 @@ def gpu_environment(runtime, display, pinned_graphics=None):
     return env
 
 
-def gpu_maps(pid):
-    """Do not treat generic gallium/llvmpipe as proof of GR3D."""
+def gpu_maps(pid, prefix):
+    """A Grate process maps a matched EGL + GLES + Gallium ABI, not grate_dri.so."""
     try:
         maps = Path("/proc/%d/maps" % pid).read_text(errors="replace")
     except (FileNotFoundError, PermissionError):
         return False, False
     reject = bool(re.search(r"/(?:swrast|kms_swrast|softpipe|llvmpipe)_dri\.so\b", maps))
-    return bool(re.search(r"/grate_dri\.so\b", maps)), reject
+    required = ("libgallium-25.0.7.so", "libEGL.so.1.0.0", "libGLESv2.so.2.0.0")
+    matched = all(str(Path(prefix) / name) in maps for name in required)
+    return matched, reject
 
 
 def run_qualified(argv, env, seconds, evidence_dir):
@@ -240,7 +272,7 @@ def run_qualified(argv, env, seconds, evidence_dir):
             timed_out = False
             try:
                 while child.poll() is None and time.monotonic() < deadline:
-                    a, b = gpu_maps(child.pid)
+                    a, b = gpu_maps(child.pid, env["LIBGL_DRIVERS_PATH"])
                     driver_seen |= a
                     rejected |= b
                     if rejected:
@@ -269,7 +301,7 @@ def run_qualified(argv, env, seconds, evidence_dir):
         soft = bool(re.search(r"(?i)(?:OpenGL renderer|GL_RENDERER)[^\n]*(?:llvmpipe|softpipe|swrast)", output))
         receipt = {
             "exit_code": child.returncode, "timeout": timed_out,
-            "grate_dri_mapped": driver_seen, "software_dri_mapped": rejected,
+            "pinned_grate_egl_gles_gallium_mapped": driver_seen, "software_dri_mapped": rejected,
             "software_gl_renderer": soft, "negotiated_glmemory_caps": gl_caps,
             "success": child.returncode == 0 and not timed_out and driver_seen
                        and not rejected and not soft and gl_caps,

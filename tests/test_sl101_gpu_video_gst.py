@@ -65,9 +65,9 @@ class StrictGPUVideo(unittest.TestCase):
             "WLR_RENDERER": "gles2", "WLR_RENDERER_ALLOW_SOFTWARE": "0",
             "MESA_LOADER_DRIVER_OVERRIDE": "grate",
             "LD_LIBRARY_PATH": "/usr/local/lib/sl101-libdrm-import-lists-" + "a"*16
-                               + ":/usr/local/lib/sl101-grate-" + "b"*64 + "/lib",
-            "LIBGL_DRIVERS_PATH": "/usr/local/lib/sl101-grate-" + "b"*64 + "/lib",
-            "GBM_BACKENDS_PATH": "/usr/local/lib/sl101-grate-" + "b"*64 + "/lib/gbm",
+                               + ":" + module.GRATE_PREFIX_106,
+            "LIBGL_DRIVERS_PATH": module.GRATE_PREFIX_106,
+            "GBM_BACKENDS_PATH": module.GRATE_PREFIX_106 + "/gbm",
             "LD_PRELOAD": "/usr/local/lib/gr3d_serialize.so",
         }
         pinned = module.validate_compositor_env(valid)
@@ -93,6 +93,55 @@ class StrictGPUVideo(unittest.TestCase):
         with self.assertRaises(module.GateError):
             module.validate_compositor_env({**valid, "GALLIUM_DRIVER": "softpipe"})
 
+    def test_proc_environment_uses_actual_nul_separator(self):
+        raw = b"WLR_RENDERER=gles2\x00MESA_LOADER_DRIVER_OVERRIDE=grate\x00"
+        raw += b"LD_LIBRARY_PATH=/opt/alpha=beta\x00"
+        data = module.parse_proc_environment(raw)
+        self.assertEqual(data["WLR_RENDERER"], "gles2")
+        self.assertEqual(data["MESA_LOADER_DRIVER_OVERRIDE"], "grate")
+        self.assertEqual(data["LD_LIBRARY_PATH"], "/opt/alpha=beta")
+        self.assertEqual(len(data), 3)
+        for value in ("bad\\npath", "bad\\rpath", "bad\\x00path"):
+            valid = {"WLR_RENDERER": "gles2",
+                     "WLR_RENDERER_ALLOW_SOFTWARE": "0",
+                     "MESA_LOADER_DRIVER_OVERRIDE": "grate",
+                     "LD_LIBRARY_PATH": value,
+                     "LIBGL_DRIVERS_PATH": module.GRATE_PREFIX_106,
+                     "GBM_BACKENDS_PATH": module.GRATE_PREFIX_106 + "/gbm",
+                     "LD_PRELOAD": "/usr/local/lib/gr3d_serialize.so"}
+            # Invalid embedded controls fail before any graphics launch.
+            with self.assertRaises(module.GateError):
+                module.validate_compositor_env(valid)
+
+    def test_pinned_mesa_sha_gate(self):
+        from unittest.mock import patch
+        import hashlib
+        with tempfile.TemporaryDirectory() as tmp:
+            filenames = ("libgallium-25.0.7.so", "libEGL.so.1.0.0",
+                         "libGLESv2.so.2.0.0")
+            digest = {}
+            for name in filenames:
+                data = ("test-" + name).encode()
+                (Path(tmp) / name).write_bytes(data)
+                digest[name] = hashlib.sha256(data).hexdigest()
+            with patch.object(module, "GRATE_PREFIX_106", tmp), patch.object(
+                    module, "GRATE_ELF_SHA256", digest):
+                module.verify_grate_libraries(tmp)
+                (Path(tmp) / filenames[0]).write_bytes(b"corrupted")
+                with self.assertRaises(module.GateError):
+                    module.verify_grate_libraries(tmp)
+
+    def test_strict_gpu_libgallium_maps(self):
+        from unittest.mock import patch
+        prefix = module.GRATE_PREFIX_106
+        maps = "\\n".join(prefix + "/" + name for name in module.GRATE_ELF_SHA256)
+        with patch.object(module.Path, "read_text", return_value=maps):
+            self.assertEqual(module.gpu_maps(10, prefix), (True, False))
+        with patch.object(module.Path, "read_text", return_value=maps + "\\n/lib/swrast_dri.so"):
+            self.assertEqual(module.gpu_maps(10, prefix), (True, True))
+        with patch.object(module.Path, "read_text", return_value="/lib/libgallium-25.0.7.so"):
+            self.assertEqual(module.gpu_maps(10, prefix), (False, False))
+
     def test_kms_refused_even_with_dry_run(self):
         result = subprocess.run([sys.executable, str(PLAYER), "--mode=kms",
                                  "--dry-run", "/tmp/clip.mp4"],
@@ -107,7 +156,7 @@ class StrictGPUVideo(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         out = json.loads(result.stdout)
         self.assertFalse(out["device_qualified"])
-        self.assertEqual(out["command_argv"][5], "location=/tmp/a b ' ; .mp4")
+        self.assertEqual(out["command_argv"][6], "location=/tmp/a b ' ; .mp4")
         self.assertNotIn("videoconvert", out["command_argv"])
 
     def test_kernel_pin(self):

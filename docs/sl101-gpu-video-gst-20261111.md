@@ -51,10 +51,15 @@ WLR_RENDERER_ALLOW_SOFTWARE=0 and reuses its content-pinned Mesa/libdrm/
 GBM paths plus GR3D serialization preload. Pixman Sway is rejected. Debian .100 is intentionally
 blocked until its separate MMC identity and GStreamer EGL stack qualify.
 Rejects a software GL environment, unexpected GPU vendor/path, no GLMemory
-caps, errors and expired tests. The process-maps attestation requires a
-literal grate_dri.so path; Mesa installations mapping only libgallium.so
-will be conservatively marked unqualified until a stronger GL_RENDERER or
-driver ioctl attestor is added. Do not bypass the gate based on name alone.
+caps, errors and expired tests. The .106 release actually loads /opt/grate-mesa25-musl-prod70-20261109/lib,
+NOT the obsolete /usr/local/lib/sl101-grate-<hash>/lib naming assumption.
+The launcher attests that running Sway is a real Grate GLES2 compositor,
+requires exact recorded SHA256 for libgallium-25.0.7.so, libEGL.so.1.0.0
+and libGLESv2.so.2.0.0, and checks that the player maps all three from the
+same prefix. These checks prove provenance, not final pixel correctness;
+Mesa libgallium includes multiple drivers. No guessed grate_dri.so is
+required. The launcher also uses the running desktop's pinned Wayland socket
+rather than an unrelated SSH login's XDG_RUNTIME_DIR.
 The logger stores process output and a JSON receipt if --evidence-dir set.
 
     python3 scripts/sl101-gpu-video-gst.py --dry-run --memory=dmabuf /path/video.mp4
@@ -101,5 +106,8 @@ switch latency, lost frames and rollback success rather than claim seamlessness.
 5. Only after stable Sway results and dedicated EGL/GBM KMS renderer evidence,
    run supervised KMS vs Sway comparison, preserve rollback and restore Sway.
 
-Run offline host acceptance: python3 -m unittest tests/test_sl101_gpu_video_gst.py,
-make test and make check. No production promotion or device mutation here.
+Run offline host acceptance: python3 -m unittest discover -s tests -p
+ test_sl101_gpu_video_gst.py, make test and make check. This document was
+updated after separately authorized .106 hardware tests; see
+`docs/sl101-gpu-video-hardware-20261112.md` for exact failures and evidence.
+No production promotion, KMS takeover or installed Mesa mutation.
