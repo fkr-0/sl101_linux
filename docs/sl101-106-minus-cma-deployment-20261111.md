@@ -1,7 +1,7 @@
-# SL101 .106 — minus-CMA benchmark: flashed, rebooted, verified
+# SL101 .106 — historical minus-CMA benchmark deployment (now restored to CMA)
 
 Date: 2026-11-11. Target: sl101-nura, 192.168.23.106.
-**SUCCESS:** normal boot into 7.0.1-postmarketos-grate-dmavde1-minus-cma.
+**Historical B-side deployment SUCCEEDED**: minus-CMA was normally booted, measured with 60 AC-powered H.264 decode runs, then intentionally replaced by its previously backed-up four-patch CMA image; **current running kernel is CMA** (boot ID 48d4a72f-146f-43c7-a308-496466246821). The return-to-A full 8MiB readback, device recovery, 60 A decodes and statistical comparison are documented in docs/sl101-106-cma-minus-cma-ac-60-pair-20261111.md. Retain this document as the earlier B flash/rollback provenance.
 
 ## Artifact identity
 

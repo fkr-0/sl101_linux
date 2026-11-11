@@ -1,6 +1,6 @@
 # SL101 7.0.1: CMA A/B release-candidate pair
 
-**Built:** 2026-11-10. **Current verified status 2026-11-11**: four-patch CMA RC successfully flashed, booted and GPU/VDE functionally qualified first on .106, then deployed to Debian .100 and independently boot-confirmed (new boot ID b0236ec3-8c7f-4ad6-af5b-9dc9f5e76174), with 587 modules and working real H.264 VDE decode. The .106 device now runs the minus-CMA control and completed 60 battery-powered decode benchmarks with 2040 traced CMA allocations and no failures. **This battery benchmark is NOT a matched AC-powered A-B-A comparison**; full performance gate remains OPEN. Details in docs/sl101-100-cma-flash-readback-reboot-pending-20261111.md and docs/sl101-106-minus-cma-deployment-20261111.md.
+**Built:** 2026-11-10. **Current verified status 2026-11-11:** four-patch CMA RC successfully flashed, booted and GPU/VDE functionally qualified on .106, then deployed and boot-confirmed on Debian .100 (boot ID b0236ec3-8c7f-4ad6-af5b-9dc9f5e76174). The .106 device then completed AC-powered 60-run minus-CMA B, restored the exact four-patch CMA A 8MiB LNX, rebooted (NEW boot ID 48d4a72f-146f-43c7-a308-496466246821), and completed AC-powered 60-run A. Both have 2040 allocations and releases and zero failures. p50 pipeline B 925.378 ms vs A 918.958 ms (small 0.7% edge for CMA). Both tablets now run the CMA RC. The full A1-B-A2 three-boot performance gate remains OPEN; see docs/sl101-106-cma-minus-cma-ac-60-pair-20261111.md.
 
 ## Artifact identities
 

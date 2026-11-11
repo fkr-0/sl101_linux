@@ -1,6 +1,6 @@
 # SL101 .106 — CMA vs minus-CMA: physical benchmark gate
 
-Date: 2026-11-11. **Current physical state:** .106 runs minus-CMA after a verified normal reboot and has now completed 60 H.264 decode repetitions with 2040 kernel CMA allocation trace events, all without allocation errors. It was unplugged (AC=0) with ondemand CPU 760→1000MHz, so its p50 1021.452ms is a BATTERY diagnostic, not a matched A-B-A datapoint. .100 successfully booted the intended four-patch CMA kernel (boot ID b0236ec3-8c7f-4ad6-af5b-9dc9f5e76174), with 587 modules and a successful real hardware H.264 decode. Full A1-B-A2 performance comparison remains OPEN; see docs/sl101-106-minus-cma-deployment-20261111.md and docs/sl101-100-cma-flash-readback-reboot-pending-20261111.md.
+Date: 2026-11-11. **Latest verified state:** .106 has now completed **60 minus-CMA decodes on AC**, restored the four-patch CMA LNX with full physical readback and unchanged neighbor partitions, normally rebooted (new boot ID 48d4a72f-146f-43c7-a308-496466246821), and completed **60 CMA decodes on AC** on the very same tablet. Both runs 60/60 pass with 2040 CMA allocations and 2040 releases each, zero failures. The median CMA pipeline was 918.958 ms versus minus-CMA 925.378 ms (~0.7% lower); the difference is small and not a proven causal speedup. Both .100 and .106 now run the four-patch CMA RC. Full, source-grounded report: docs/sl101-106-cma-minus-cma-ac-60-pair-20261111.md. The formal three-boot A1-B-A2 performance gate remains OPEN; the new pair is B60→A60.
 
 ## Two independently built benchmark kernels
 
@@ -9,10 +9,7 @@ Date: 2026-11-11. **Current physical state:** .106 runs minus-CMA after a verifi
 | A | 7.0.1-pmos-grate-dmavde1 | 7.0.1-postmarketos-grate-dmavde1 | d7781381ee52efb3be6edf885857b2800a4e1e00ce989a63a00955035183d8dc |
 | B | 7.0.1-pmos-grate-dmavde1-minus-cma | 7.0.1-postmarketos-grate-dmavde1-minus-cma | 774931dae8224afb78bd2f38272bcfbe6496f3b8db86b600fb26d81f208e4c3d |
 
-The already-completed host A/B gate proved that the source trees differ
-only in arch/arm/mm/dma-mapping.c by the CMA remap patch. The kernel
-configurations are otherwise identical apart from LOCALVERSION; both
-have the same SL101 DTB and 587 matching module paths. **B is now successfully booted on .106** (boot ID 2459039c-a4d8-4cdb-9128-dd3b3061f771) with 587 modules, Sway/NuraLoumi/WayVNC and bounded VDE decoder smoke verified. This does not complete the long A-B-A performance gate.
+The host A/B gate proved that the source trees differ only in arch/arm/mm/dma-mapping.c by the CMA remap patch. The kernel configurations are otherwise identical apart from LOCALVERSION; both have the same SL101 DTB and 587 matching module paths. B was successfully booted on .106 (boot ID 2459039c-a4d8-4cdb-9128-dd3b3061f771), benchmarked for 60 AC-powered decodes and then replaced by restored A. **A currently runs on .106**, with new boot ID 48d4a72f-146f-43c7-a308-496466246821 and 60 successful AC-powered decodes. This is B60→A60, not the full three-boot A1-B-A2 gate.
 
 ## Actual hardware qualification of A on .106
 
@@ -119,7 +116,7 @@ CMA median pipeline overhead, 10% p95 overhead or 20% p99 overhead
 as a performance regression. These are operational thresholds,
 not formal proofs of memory safety or perfect latency.
 
-The extended same-device A1-B-A2 measurement remains **NOT MEASURED**. On .106 both original A and B five-run smokes were AC-powered, but only five runs each; its later 60-run B diagnostic was on battery. On Debian .100, the four-patch CMA kernel was successfully flashed and rebooted, with a separate **60-run AC-powered VDE/CMA benchmark** (60/60, 2040 allocation events, p50 1468.307ms), documented at docs/sl101-100-cma-vde-benchmark-20261111.md. That run uses different device and userspace, so it cannot substitute for same-device CMA A1. The performance promotion gate remains **RED / A-B-A NOT MEASURED**.
+The formal three-boot A1-B-A2 measurement remains **NOT MEASURED**, although the new physically matched B60→A60 120-decode comparison is COMPLETE (docs/sl101-106-cma-minus-cma-ac-60-pair-20261111.md). On .106 both original A and B five-run smokes were AC-powered, but only five runs each; its later 60-run B diagnostic was on battery. On Debian .100, the four-patch CMA kernel was successfully flashed and rebooted, with a separate **60-run AC-powered VDE/CMA benchmark** (60/60, 2040 allocation events, p50 1468.307ms), documented at docs/sl101-100-cma-vde-benchmark-20261111.md. That run uses different device and userspace, so it cannot substitute for same-device CMA A1. The performance promotion gate remains **RED / A-B-A NOT MEASURED**.
 
 ## Release gates before .100
 
