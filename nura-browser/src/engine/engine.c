@@ -22,6 +22,9 @@ typedef struct {
     gboolean stopping;
     gboolean nav_attached;
     gboolean control_started;
+    gboolean require_load_completion;
+    gboolean load_finished;
+    gboolean load_failed;
     guint sigint_source;
     guint sigterm_source;
     guint timer_source;
@@ -44,7 +47,11 @@ static void
 on_wpe_closed(WPEView *view, gpointer user_data)
 {
     (void)view;
-    request_stop(user_data, EXIT_SUCCESS);
+    NuraBrowserEngine *engine = user_data;
+    /* A closed view before the headless CI deadline is not a successful
+     * stability test, even if a load-finished event arrived earlier. */
+    request_stop(engine, engine->require_load_completion ? EXIT_FAILURE
+                                                         : EXIT_SUCCESS);
 }
 
 static void
@@ -77,7 +84,8 @@ on_load_failed(WebKitWebView *view, WebKitLoadEvent stage,
 {
     (void)view;
     (void)uri; /* Never log navigation URLs, which may contain secrets. */
-    (void)user_data;
+    NuraBrowserEngine *engine = user_data;
+    engine->load_failed = TRUE;
     /* Avoid error->message: some transport errors embed the full URI. */
     g_warning("NuraBrowser: navigation load failed at stage %d (domain=%s, code=%d)",
               (int)stage, error ? g_quark_to_string(error->domain) : "unknown",
@@ -85,6 +93,19 @@ on_load_failed(WebKitWebView *view, WebKitLoadEvent stage,
     /* FALSE allows WebKit's own error-page handler. A failed navigation
      * must not trigger a busy reload or terminate the control endpoint. */
     return FALSE;
+}
+
+static void
+on_load_changed(WebKitWebView *view, WebKitLoadEvent stage, gpointer user_data)
+{
+    (void)view;
+    NuraBrowserEngine *engine = user_data;
+    if (stage == WEBKIT_LOAD_FINISHED) {
+        engine->load_finished = TRUE;
+        /* Do not log the URI: page URLs may contain credentials or secrets. */
+        g_message("NuraBrowser: WebKit load-finished (failed=%s)",
+                  engine->load_failed ? "yes" : "no");
+    }
 }
 
 static void
@@ -101,7 +122,8 @@ on_sigint(gpointer user_data)
 {
     NuraBrowserEngine *engine = user_data;
     engine->sigint_source = 0;
-    request_stop(engine, EXIT_SUCCESS);
+    request_stop(engine, engine->require_load_completion ? EXIT_FAILURE
+                                                         : EXIT_SUCCESS);
     return G_SOURCE_REMOVE;
 }
 
@@ -110,7 +132,8 @@ on_sigterm(gpointer user_data)
 {
     NuraBrowserEngine *engine = user_data;
     engine->sigterm_source = 0;
-    request_stop(engine, EXIT_SUCCESS);
+    request_stop(engine, engine->require_load_completion ? EXIT_FAILURE
+                                                         : EXIT_SUCCESS);
     return G_SOURCE_REMOVE;
 }
 
@@ -119,8 +142,15 @@ on_ci_timeout(gpointer user_data)
 {
     NuraBrowserEngine *engine = user_data;
     engine->timer_source = 0;
-    g_message("NuraBrowser: headless CI exit deadline reached");
-    request_stop(engine, EXIT_SUCCESS);
+    if (!engine->load_finished || engine->load_failed) {
+        g_warning("NuraBrowser: headless CI deadline failed (load-finished=%s, load-failed=%s)",
+                  engine->load_finished ? "yes" : "no",
+                  engine->load_failed ? "yes" : "no");
+        request_stop(engine, EXIT_FAILURE);
+    } else {
+        g_message("NuraBrowser: headless CI PASS (load-finished, no load failure, deadline reached)");
+        request_stop(engine, EXIT_SUCCESS);
+    }
     return G_SOURCE_REMOVE;
 }
 
@@ -217,6 +247,7 @@ nurabrowser_engine_run(const NuraBrowserOptions *options)
 
     NuraBrowserEngine engine = { 0 };
     engine.result = EXIT_FAILURE;
+    engine.require_load_completion = options->exit_after_ms != 0;
     g_autoptr(GError) error = NULL;
     g_autofree char *socket_path = NULL;
 
@@ -273,6 +304,8 @@ nurabrowser_engine_run(const NuraBrowserOptions *options)
                      G_CALLBACK(on_web_process_terminated), &engine);
     g_signal_connect(engine.context.view, "load-failed",
                      G_CALLBACK(on_load_failed), &engine);
+    g_signal_connect(engine.context.view, "load-changed",
+                     G_CALLBACK(on_load_changed), &engine);
 
     nurabrowser_nav_attach(&engine.context);
     engine.nav_attached = TRUE;
@@ -297,7 +330,8 @@ nurabrowser_engine_run(const NuraBrowserOptions *options)
     webkit_web_view_load_uri(engine.context.view, options->url);
     if (!engine.stopping)
         g_main_loop_run(engine.context.loop);
-    engine.result = engine.stopping ? engine.result : EXIT_SUCCESS;
+    if (!engine.stopping)
+        g_warning("NuraBrowser: GLib loop exited without a verified stop event");
 
 done:
     cleanup_engine(&engine);
