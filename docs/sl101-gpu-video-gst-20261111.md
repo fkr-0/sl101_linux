@@ -45,7 +45,10 @@ scaling, decoding or rasterization). It cannot be called zero-copy.
 All operations are explicit, no autovideosink, videoscale, videoconvert,
 waylandsink, kmssink, software decoder, Sway teardown or automatic fallback.
 Runs only as an unprivileged Sway user on identified .106 (hostname plus
-both MMC CIDs) with an exact pinned dmavde1 kernel. Debian .100 is intentionally
+both MMC CIDs) with an exact pinned dmavde1 kernel. It reads the ACTUAL
+running /usr/local/bin/sl101-sway process environ, requires Grate GLES2 with
+WLR_RENDERER_ALLOW_SOFTWARE=0 and reuses its content-pinned Mesa/libdrm/
+GBM paths plus GR3D serialization preload. Pixman Sway is rejected. Debian .100 is intentionally
 blocked until its separate MMC identity and GStreamer EGL stack qualify.
 Rejects a software GL environment, unexpected GPU vendor/path, no GLMemory
 caps, errors and expired tests. The process-maps attestation requires a
