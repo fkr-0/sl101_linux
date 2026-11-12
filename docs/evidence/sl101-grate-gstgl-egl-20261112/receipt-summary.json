@@ -1,0 +1,35 @@
+{
+  "schema": "sl101.grate-gstgl-egl-evidence-summary/v1",
+  "task": "SL101-LINUX-OCP-SL101-GRATE-GST-GL-VIDEO-20261112-20261112-058763",
+  "device": ".106 sl101-nura Alpine musl",
+  "kernel": "7.0.1-postmarketos-grate-dmavde1",
+  "private_mesa": "/opt/grate-mesa25-musl-prod70-20261109/lib",
+  "run3": {
+    "receipt_sha256": "9e1d0bbdaf6df3b71084f1b5eca7a6b294d0a07a6b9d5fb76b11dab86b7733b5",
+    "gst_log_sha256": "f1cdcb1dd68728cc5b1b0f6ce109d4a026a1e857da664de98358526a6ce6db40",
+    "eglinfo_exit": 0,
+    "gst_fixture_exit": -15,
+    "gst_fixture_timeout": true,
+    "egl_dri2_screen_failure": true,
+    "gst_glmemory_caps": false,
+    "gst_mapped_gallium_25_and_26": true,
+    "native_egl_initialized": true,
+    "platform_egl_initialized": true,
+    "platform_with_system_libgl_egl_initialized": true
+  },
+  "run5": {
+    "receipt_sha256": "17daa5d553131d89082eae9a53b9fdfef4dc8b449788299728fdfe49ee859625",
+    "native_fbo_exit": 17,
+    "platform_fbo_exit": 17,
+    "system_libgl_fbo_exit": 17,
+    "fbo_64x64_status": "0x8cdd",
+    "real_gl_vendor": "Grate",
+    "real_gl_renderer": "Tegra"
+  },
+  "gpu_video_accepted": false,
+  "rendered_video_pixels_accepted": false,
+  "shader_pixel_oracle_accepted": false,
+  "zero_copy_dmabuf_import_accepted": false,
+  "fps_and_av_sync_accepted": false,
+  "promotion": false
+}
